@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2020", // modern JS output
-    "module": "ESNext", // emit ESM
+  "module": "NodeNext", // emit ESM (NodeNext required with moduleResolution: NodeNext)
     "moduleResolution": "NodeNext", // resolves Node-style imports
     "rootDir": ".", // project root (since index.ts + lib are here)
     "outDir": "./dist", // compiled output

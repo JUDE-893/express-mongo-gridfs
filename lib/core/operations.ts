@@ -1,6 +1,6 @@
-import { deleteChunks, readChunks, writeChunks } from "./gridfsChunk.js";
+import { deleteChunks, readChunks, writeChunks, chunksExist } from "./gridfsChunk.js";
 import { isGridFSReady } from "./gridfs.js";
-import { pickModelFields } from "./schemaUtils.js";
+import { pickModelFields, getTopLevelSchemaKeys } from "./schemaUtils.js";
 import mongoose from "mongoose";
 
 
@@ -298,4 +298,146 @@ export {
  };
 
 export { updateFile };
+
+/**
+ * Replace an existing file (chunks + metadata) with a new file.
+ * This helper is auth-agnostic and returns structured results or throws structured errors
+ * that request handlers can map to HTTP responses.
+ *
+ * @param {mongoose.Model<any>} FileModel - Mongoose model for file metadata.
+ * @param {string} oldFileIdStr - The existing file id to replace.
+ * @param {object} file - File object { originalname, buffer, mimetype, size, metadata? }.
+ * @param {object} requestBody - Request body (used to pick custom model fields and optional metadata string).
+ * @returns {Promise<any>} Resolves with details about the replaced file.
+ * @throws {{code:string, message:string}} Structured errors: INVALID_ID, OLD_FILE_NOT_FOUND, WRITE_ERROR, SAVE_METADATA_ERROR
+ */
+const replaceFile = async (FileModel: any, oldFileIdStr: any, file: any, requestBody: any): Promise<any> => {
+    if (!FileModel || typeof FileModel.findById !== 'function') {
+        throw { code: 'INVALID_MODEL', message: 'Invalid FileModel provided' };
+    }
+
+    const idStr = oldFileIdStr?.toString?.();
+    if (!idStr || !mongoose.Types.ObjectId.isValid(idStr)) {
+        throw { code: 'INVALID_ID', message: 'Invalid file ID' };
+    }
+
+    if (!file) {
+        throw { code: 'NO_FILE', message: 'No file provided' };
+    }
+
+    const oldObjectId = new mongoose.Types.ObjectId(idStr);
+
+    // Fetch old metadata
+    const oldFileMetadata = await FileModel.findById(oldObjectId);
+    if (!oldFileMetadata) {
+        throw { code: 'OLD_FILE_NOT_FOUND', message: 'Old file metadata not found' };
+    }
+
+    // Check if old chunks exist
+    let oldChunksExistFlag = false;
+    try {
+        oldChunksExistFlag = await chunksExist(oldObjectId.toString());
+    } catch (e: any) {
+        // If the check fails, proceed but warn later
+        console.warn('replaceFile: chunksExist check failed', e?.message || e);
+    }
+
+    const newFileId = new mongoose.Types.ObjectId();
+
+    try {
+        // Write new chunks
+        const chunkInfo = await writeChunks(
+            newFileId,
+            file.originalname,
+            file.buffer,
+            {
+                contentType: file.mimetype,
+                metadata: requestBody?.metadata ?? file.metadata ?? {}
+            }
+        );
+
+        // Parse metadata if provided as string
+        let metadataObj: any = {};
+        if (requestBody && requestBody.metadata) {
+            try {
+                metadataObj = typeof requestBody.metadata === 'string'
+                    ? JSON.parse(requestBody.metadata)
+                    : requestBody.metadata;
+            } catch (e: any) {
+                console.warn('replaceFile: failed to parse metadata:', e?.message || e);
+            }
+        } else if (file && file.metadata) {
+            metadataObj = file.metadata;
+        }
+
+        // Build custom fields: prefer request-provided values, fall back to old metadata
+        const coreFields = ['_id','filename','contentType','length','chunkSize','uploadDate','metadata'];
+        const allowedKeys = getTopLevelSchemaKeys(FileModel).filter((k: string) => !coreFields.includes(k));
+        const customFromReqOrOld: any = {};
+        for (const key of allowedKeys) {
+            if (Object.prototype.hasOwnProperty.call(requestBody, key)) {
+                customFromReqOrOld[key] = requestBody[key];
+            } else if (oldFileMetadata[key] !== undefined) {
+                customFromReqOrOld[key] = oldFileMetadata[key];
+            }
+        }
+
+        const newFileMetadata = new FileModel({
+            _id: newFileId,
+            filename: file.originalname,
+            contentType: file.mimetype,
+            length: file.size,
+            chunkSize: chunkInfo.chunkSize,
+            uploadDate: new Date(),
+            metadata: metadataObj,
+            ...customFromReqOrOld
+        });
+
+        await newFileMetadata.save();
+
+        const warnings: string[] = [];
+
+        // Delete old chunks (best-effort)
+        if (oldChunksExistFlag) {
+            try {
+                await deleteChunks(oldObjectId.toString());
+            } catch (deleteError: any) {
+                console.error('replaceFile: error deleting old file chunks:', deleteError);
+                warnings.push('Failed to delete old file chunks');
+            }
+        }
+
+        // Delete old metadata
+        await FileModel.findByIdAndDelete(oldObjectId);
+
+        const result = {
+            success: true,
+            oldFileId: oldObjectId.toString(),
+            newFile: {
+                fileId: newFileId.toString(),
+                filename: newFileMetadata.filename,
+                contentType: newFileMetadata.contentType,
+                length: newFileMetadata.length,
+                uploadDate: newFileMetadata.uploadDate,
+                metadata: newFileMetadata.metadata
+            }
+        } as any;
+
+        if (warnings.length > 0) result.warnings = warnings;
+
+        return result;
+
+    } catch (err: any) {
+        // Attempt cleanup of new chunks
+        try {
+            await deleteChunks(newFileId.toString());
+        } catch (cleanupErr: any) {
+            console.error('replaceFile: cleanup failed for chunks:', cleanupErr);
+        }
+
+        throw { code: 'WRITE_ERROR', message: err?.message || String(err) };
+    }
+};
+
+export { replaceFile };
 

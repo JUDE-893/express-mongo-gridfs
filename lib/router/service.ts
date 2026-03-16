@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { writeChunks, readChunks, deleteChunks, chunksExist } from '@/lib/core/gridfsChunk';
-import { deleteFiles, getFileAndBuffer, updateFile } from '@/lib/core/operations';
+import { deleteFiles, getFileAndBuffer, updateFile, replaceFile } from '@/lib/core/operations';
 import { Request, Response, RequestHandler } from 'express';
 
 interface CustomRequest extends Request {
@@ -270,148 +270,56 @@ const createListFilesHandler = (FileModel: mongoose.Model<any>): RequestHandler 
 const createFileUpdateHandler = (FileModel: mongoose.Model<any>): RequestHandler => {
     return async (req: CustomRequest, res: Response | any) => {
         try {
-            // Validate input
+            // Basic validation
             if (!req.file) {
-                return res.status(400).json({
-                    error: "No file uploaded",
-                    code: "NO_FILE"
-                });
+                return res.status(400).json({ error: "No file uploaded", code: "NO_FILE" });
             }
 
             if (!req.body.id) {
-                return res.status(400).json({
-                    error: "File ID is required",
-                    code: "MISSING_ID"
-                });
+                return res.status(400).json({ error: "File ID is required", code: "MISSING_ID" });
             }
 
-            // Validate file ID format
             if (!mongoose.Types.ObjectId.isValid(req.body.id)) {
-                return res.status(400).json({
-                    error: "Invalid file ID format",
-                    code: "INVALID_ID_FORMAT"
-                });
+                return res.status(400).json({ error: "Invalid file ID format", code: "INVALID_ID_FORMAT" });
             }
-
-            const oldFileId = new mongoose.Types.ObjectId(req.body.id);
-
-            // Check if old file exists in our custom metadata collection
-            const oldFileMetadata = await FileModel.findById(oldFileId);
-
-            if (!oldFileMetadata) {
-                return res.status(404).json({
-                    error: "Old file not found",
-                    code: "OLD_FILE_NOT_FOUND"
-                });
-            }
-
-            // Check if chunks exist for the old file
-            const oldChunksExist = await chunksExist(oldFileId.toString());
-
-            // Generate new file ID (different from old one for safety)
-            const newFileId = new mongoose.Types.ObjectId();
 
             try {
-                // Write new file chunks
-                const chunkInfo = await writeChunks(
-                    newFileId,
-                    req.file.originalname,
-                    req.file.buffer,
-                    {
-                        contentType: req.file.mimetype,
-                        metadata: req.body.metadata || {}
-                    }
-                );
+                const result = await replaceFile(FileModel, req.body.id, req.file, req.body);
 
-                // Parse metadata if it's a string
-                let metadataObj = {};
-                if (req.body.metadata) {
-                    try {
-                        metadataObj = typeof req.body.metadata === 'string'
-                            ? JSON.parse(req.body.metadata)
-                            : req.body.metadata;
-                    } catch (e: any) {
-                        console.warn('Failed to parse metadata:', e);
-                    }
-                }
-
-                // Build custom fields: prefer request-provided values, fall back to old metadata
-                const coreFields = ['_id','filename','contentType','length','chunkSize','uploadDate','metadata'];
-                const allowedKeys = getTopLevelSchemaKeys(FileModel).filter((k: string) => !coreFields.includes(k));
-                const customFromReqOrOld: any = {};
-                for (const key of allowedKeys) {
-                    if (Object.prototype.hasOwnProperty.call(req.body, key)) {
-                        customFromReqOrOld[key] = req.body[key];
-                    } else if (oldFileMetadata[key] !== undefined) {
-                        customFromReqOrOld[key] = oldFileMetadata[key];
-                    }
-                }
-
-                const newFileMetadata = new FileModel({
-                    _id: newFileId,
-                    filename: req.file.originalname,
-                    contentType: req.file.mimetype,
-                    length: req.file.size,
-                    chunkSize: chunkInfo.chunkSize,
-                    uploadDate: new Date(),
-                    metadata: metadataObj,
-                    ...customFromReqOrOld
-                });
-
-                // Save new metadata
-                await newFileMetadata.save();
-
-                // Delete old file chunks
-                if (oldChunksExist) {
-                    try {
-                        await deleteChunks(oldFileId.toString());
-                    } catch (deleteError: any) {
-                        console.error('Error deleting old file chunks:', deleteError);
-                        // Continue anyway - we have the new file
-                    }
-                }
-
-                // Delete old file metadata
-                await FileModel.findByIdAndDelete(oldFileId);
-
-                res.status(200).json({
+                return res.status(200).json({
                     success: true,
                     message: "File updated successfully",
-                    oldFileId: oldFileId.toString(),
-                    newFile: {
-                        fileId: newFileId.toString(),
-                        filename: newFileMetadata.filename,
-                        contentType: newFileMetadata.contentType,
-                        length: newFileMetadata.length,
-                        uploadDate: newFileMetadata.uploadDate,
-                        metadata: newFileMetadata.metadata
-                    }
+                    oldFileId: result.oldFileId,
+                    newFile: result.newFile,
+                    ...(result.warnings ? { warnings: result.warnings } : {})
                 });
 
             } catch (uploadError: any) {
-                console.error('Failed to upload new file:', uploadError);
-
-                // Clean up new file chunks if upload failed
-                try {
-                    await deleteChunks(newFileId.toString());
-                } catch (cleanupError: any) {
-                    console.error('Error cleaning up failed upload chunks:', cleanupError);
+                // Map structured helper errors to HTTP responses
+                if (uploadError && uploadError.code === 'INVALID_ID') {
+                    return res.status(400).json({ error: "Invalid file ID format", code: "INVALID_ID_FORMAT" });
                 }
 
-                return res.status(500).json({
-                    error: "Failed to update file",
-                    message: uploadError.message,
-                    code: "UPDATE_ERROR"
-                });
+                if (uploadError && uploadError.code === 'OLD_FILE_NOT_FOUND') {
+                    return res.status(404).json({ error: "Old file not found", code: "OLD_FILE_NOT_FOUND" });
+                }
+
+                if (uploadError && uploadError.code === 'NO_FILE') {
+                    return res.status(400).json({ error: "No file uploaded", code: "NO_FILE" });
+                }
+
+                if (uploadError && uploadError.code === 'WRITE_ERROR') {
+                    console.error('Failed to upload new file:', uploadError);
+                    return res.status(500).json({ error: "Failed to update file", message: uploadError.message, code: "UPDATE_ERROR" });
+                }
+
+                // Unexpected error: rethrow to outer catch
+                throw uploadError;
             }
 
         } catch (error: any) {
             console.error('File update handler error:', error);
-            res.status(500).json({
-                error: "Server error during file update",
-                message: error.message,
-                code: "SERVER_ERROR"
-            });
+            res.status(500).json({ error: "Server error during file update", message: error.message, code: "SERVER_ERROR" });
         }
     };
 };
