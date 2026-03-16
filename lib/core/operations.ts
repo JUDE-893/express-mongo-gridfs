@@ -150,6 +150,18 @@ const deleteFiles = async (FileModel: any, filesIds: any): Promise<any> => {
     return response;
 };
 
+/**
+ * Convenience wrapper for deleting a single file by id.
+ * Accepts a single id (string or ObjectId) and forwards to deleteFiles.
+ * @param {mongoose.Model<any>} FileModel - Mongoose model for file metadata.
+ * @param {string|ObjectId} fileId - The file id to delete.
+ * @returns {Promise<any>} The same response shape as deleteFiles.
+ */
+const deleteFile = async (FileModel: any, fileId: any): Promise<any> => {
+    return deleteFiles(FileModel, fileId);
+};
+
 export {
-    deleteFiles
+    deleteFiles,
+    deleteFile
 };

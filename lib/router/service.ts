@@ -853,103 +853,25 @@ const createFileDeleteHandler = (FileModel: mongoose.Model<any>): RequestHandler
         try {
             const { fileId } = req.params;
 
-            // Validate file ID format
-            if (!mongoose.Types.ObjectId.isValid(fileId)) {
+            // Basic validation: ensure fileId is present and looks like an ObjectId
+            if (!fileId || !mongoose.Types.ObjectId.isValid(fileId)) {
                 return res.status(400).json({
                     error: "Invalid file ID format",
                     code: "INVALID_FILE_ID"
                 });
             }
 
-            const objectId = new mongoose.Types.ObjectId(fileId);
+            // Delegate deletion logic to the core operation which handles
+            // both chunk cleanup and metadata removal. This keeps the router
+            // auth-agnostic and shifts storage concerns to the helper.
+            const response = await deleteFiles(FileModel, fileId);
 
-            // Check if file exists in our custom metadata collection
-            const fileMetadata = await FileModel.findById(objectId);
-
-            if (!fileMetadata) {
-                return res.status(404).json({
-                    error: "File not found",
-                    code: "FILE_NOT_FOUND"
-                });
-            }
-
-            // Optional: Check if user has permission to delete
-            // This depends on your authentication system
-            if (req.user) {
-                // Example: Only allow delete if user is admin or owns the file
-                const isAdmin = req.user.role === 'admin';
-                const isOwner = fileMetadata.uploadedBy &&
-                    fileMetadata.uploadedBy.toString() === req.user.id;
-
-                if (!isAdmin && !isOwner) {
-                    return res.status(403).json({
-                        error: "You don't have permission to delete this file",
-                        code: "PERMISSION_DENIED"
-                    });
-                }
-            }
-
-            // Track success/failure for cleanup operations
-            let metadataDeleted = false;
-            let chunksDeleted = false;
-            let errors: string[] = [];
-
-            try {
-                // 1. Delete chunks from uploads.chunks
-                await deleteChunks(objectId.toString());
-                chunksDeleted = true;
-            } catch (chunkError: any) {
-                console.error('Error deleting chunks:', chunkError);
-                errors.push(`Failed to delete file chunks: ${chunkError.message}`);
-
-                // Check if chunks actually exist (might have been deleted already)
-                const doChunksExist = await chunksExist(objectId.toString());
-                if (!doChunksExist) {
-                    // If chunks don't exist, it's not an error
-                    chunksDeleted = true;
-                    errors.pop(); // Remove the error
-                }
-            }
-
-            try {
-                // 2. Delete metadata from custom collection
-                await FileModel.findByIdAndDelete(objectId);
-                metadataDeleted = true;
-            } catch (metadataError: any) {
-                console.error('Error deleting metadata:', metadataError);
-                errors.push(`Failed to delete file metadata: ${metadataError.message}`);
-            }
-
-            // Check if both operations were successful
-            if (metadataDeleted && chunksDeleted) {
-                return res.status(200).json({
-                    success: true,
-                    message: "File deleted successfully",
-                    fileId: fileId
-                });
-            } else {
-                // Partial success or failure
-                const statusCode = metadataDeleted || chunksDeleted ? 207 : 500;
-                const message = metadataDeleted && chunksDeleted ?
-                    "File deleted successfully" :
-                    "File deletion partially completed with errors";
-
-                return res.status(statusCode).json({
-                    success: metadataDeleted && chunksDeleted,
-                    message: message,
-                    fileId: fileId,
-                    details: {
-                        metadataDeleted,
-                        chunksDeleted
-                    },
-                    ...(errors.length > 0 && { errors })
-                });
-            }
+            const statusCode = (response.errors && response.errors.length > 0) ? 207 : 200;
+            return res.status(statusCode).json(response);
 
         } catch (error: any) {
             console.error('File delete handler error:', error);
 
-            // Handle specific error types
             if (error.name === 'CastError') {
                 return res.status(400).json({
                     error: "Invalid file ID",
