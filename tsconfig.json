@@ -1,0 +1,37 @@
+{
+  "compilerOptions": {
+    "target": "ES2020", // modern JS output
+    "module": "ESNext", // emit ESM
+    "moduleResolution": "NodeNext", // resolves Node-style imports
+    "rootDir": ".", // project root (since index.ts + lib are here)
+    "outDir": "./dist", // compiled output
+    "declaration": true, // emit .d.ts files
+    "declarationMap": true, // source maps for types
+    "sourceMap": true, // JS source maps
+    "strict": true, // all strict checks
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "types": [
+      "node"
+    ], // include Node types if needed
+    "baseUrl": ".", // project root
+    "paths": {
+      "@/*": [
+        "./*"
+      ] // alias @/lib/core/gridfs → ./lib/core/gridfs.ts
+    }
+  },
+  "include": [
+    "index.ts",
+    "lib/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "tests"
+  ]
+}
