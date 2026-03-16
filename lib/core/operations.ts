@@ -1,4 +1,6 @@
-import { deleteChunks } from "./gridfsChunk";
+import { deleteChunks, readChunks, writeChunks } from "./gridfsChunk.js";
+import { isGridFSReady } from "./gridfs.js";
+import { pickModelFields } from "./schemaUtils.js";
 import mongoose from "mongoose";
 
 
@@ -161,7 +163,139 @@ const deleteFile = async (FileModel: any, fileId: any): Promise<any> => {
     return deleteFiles(FileModel, fileId);
 };
 
-export {
-    deleteFiles,
-    deleteFile
+/**
+ * Get file metadata and its binary buffer from GridFS and the metadata collection.
+ * @param {mongoose.Model<any>} FileModel - Mongoose model for file metadata.
+ * @param {string|mongoose.Types.ObjectId} fileId - File id to retrieve.
+ * @returns {Promise<{file: any, buffer: Buffer}>}
+ * @throws {Object} Structured error with `code` and `message` fields. Possible codes: INVALID_ID, NOT_FOUND, READ_ERROR
+ */
+const getFileAndBuffer = async (FileModel: any, fileId: any): Promise<any> => {
+    // Validate FileModel
+    if (!FileModel || typeof FileModel.findById !== 'function') {
+        throw { code: 'INVALID_MODEL', message: 'Invalid FileModel provided' };
+    }
+
+    const idStr = fileId?.toString?.();
+    if (!idStr || !mongoose.Types.ObjectId.isValid(idStr)) {
+        throw { code: 'INVALID_ID', message: 'Invalid file ID' };
+    }
+
+    const objectId = new mongoose.Types.ObjectId(idStr);
+
+    // Fetch metadata
+    const fileMetadata = await FileModel.findById(objectId);
+    if (!fileMetadata) {
+        throw { code: 'NOT_FOUND', message: 'File not found' };
+    }
+
+    try {
+        const buffer = await readChunks(objectId);
+        return { file: fileMetadata, buffer };
+    } catch (err: any) {
+        throw { code: 'READ_ERROR', message: err?.message || String(err) };
+    }
 };
+
+/**
+ * Uploads a single file into GridFS and creates the corresponding metadata document.
+ * This helper is auth-agnostic and returns structured results or throws structured errors
+ * that request handlers can map to HTTP responses.
+ *
+ * @param {mongoose.Model<any>} FileModel - Mongoose model for file metadata.
+ * @param {object} file - File object { originalname, buffer, mimetype, size, metadata? }.
+ * @param {object} requestBody - Request body (used to pick custom model fields and optional metadata string).
+ * @returns {Promise<any>} Resolves with details about the saved file.
+ * @throws {{code:string, message:string}} Structured errors: NO_FILE, STORAGE_INITIALIZING, UPLOAD_ERROR
+ */
+const updateFile = async (FileModel: any, file: any, requestBody: any): Promise<any> => {
+    if (!FileModel || typeof FileModel.findById !== 'function') {
+        throw { code: 'INVALID_MODEL', message: 'Invalid FileModel provided' };
+    }
+
+    if (!file) {
+        throw { code: 'NO_FILE', message: 'No file provided' };
+    }
+
+    if (!isGridFSReady()) {
+        throw { code: 'STORAGE_INITIALIZING', message: 'Storage service is initializing' };
+    }
+
+    const fileId = new mongoose.Types.ObjectId();
+
+    try {
+        // Write chunks to gridfs
+        const chunkInfo = await writeChunks(
+            fileId,
+            file.originalname,
+            file.buffer,
+            {
+                contentType: file.mimetype,
+                metadata: requestBody?.metadata ?? file.metadata ?? {}
+            }
+        );
+
+        // Parse metadata if it's a string in requestBody (non-fatal)
+        let metadataObj: any = {};
+        if (requestBody && requestBody.metadata) {
+            try {
+                metadataObj = typeof requestBody.metadata === 'string'
+                    ? JSON.parse(requestBody.metadata)
+                    : requestBody.metadata;
+            } catch (e: any) {
+                // preserve old behavior: log and continue with empty metadata
+                console.warn('updateFile: failed to parse metadata:', e?.message || e);
+            }
+        } else if (file && file.metadata) {
+            metadataObj = file.metadata;
+        }
+
+        // Build custom fields from requestBody while excluding core fields
+        const coreFields = ['_id','filename','contentType','length','chunkSize','uploadDate','metadata'];
+        const customFromReq = pickModelFields(FileModel, requestBody || {}, { exclude: coreFields });
+
+        const fileMetadata = new FileModel({
+            _id: fileId,
+            filename: file.originalname,
+            contentType: file.mimetype,
+            length: file.size,
+            chunkSize: chunkInfo.chunkSize,
+            uploadDate: new Date(),
+            metadata: metadataObj,
+            ...customFromReq
+        });
+
+        await fileMetadata.save();
+
+        return {
+            success: true,
+            fileId: fileId.toString(),
+            filename: fileMetadata.filename,
+            contentType: fileMetadata.contentType,
+            length: fileMetadata.length,
+            uploadDate: fileMetadata.uploadDate,
+            metadata: fileMetadata.metadata,
+            doc: fileMetadata
+        };
+
+    } catch (err: any) {
+        // Attempt best-effort cleanup of written chunks
+        try {
+            await deleteChunks(fileId.toString());
+        } catch (cleanupErr: any) {
+            console.error('updateFile: cleanup failed for chunks:', cleanupErr);
+        }
+
+        throw { code: 'UPLOAD_ERROR', message: err?.message || String(err) };
+    }
+};
+
+// Export the helper
+export { 
+    deleteFiles,
+    deleteFile,
+    getFileAndBuffer
+ };
+
+export { updateFile };
+
