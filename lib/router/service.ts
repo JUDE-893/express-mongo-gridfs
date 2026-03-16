@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
-import { writeChunks, readChunks, deleteChunks, chunksExist } from './../core/gridfsChunk';
-import { deleteFiles } from './../core/operations';
+import { writeChunks, readChunks, deleteChunks, chunksExist } from '@/lib/core/gridfsChunk';
+import { deleteFiles, getFileAndBuffer, updateFile } from '@/lib/core/operations';
 import { Request, Response, RequestHandler } from 'express';
 
 interface CustomRequest extends Request {
@@ -11,7 +11,8 @@ interface CustomRequest extends Request {
     query: any;
     params: any;
 }
-import { isGridFSReady } from './../core/gridfs';
+import { isGridFSReady } from '../core/gridfs.js';
+import { pickModelFields, getTopLevelSchemaKeys } from '@/lib/core/schemaUtils';
 
 /**
  * Handles single file uploads and saves metadata.
@@ -36,76 +37,36 @@ const createFileUploadHandler = (FileModel: mongoose.Model<any>): RequestHandler
                 });
             }
 
-            // Generate a unique file ID
-            const fileId = new mongoose.Types.ObjectId();
-
             try {
-                // Write chunks directly WITHOUT creating uploads.files document
-                const chunkInfo = await writeChunks(
-                    fileId,
-                    req.file.originalname,
-                    req.file.buffer,
-                    {
-                        contentType: req.file.mimetype,
-                        metadata: req.body.metadata || {}
-                    }
-                );
+                const result = await updateFile(FileModel, req.file, req.body);
 
-                // Parse metadata if it's a string
-                let metadataObj = {};
-                if (req.body.metadata) {
-                    try {
-                        metadataObj = typeof req.body.metadata === 'string'
-                            ? JSON.parse(req.body.metadata)
-                            : req.body.metadata;
-                    } catch (e: any) {
-                        console.warn('Failed to parse metadata:', e);
-                    }
-                }
-
-                // Create file metadata document ONLY in our custom collection
-                const fileMetadata = new FileModel({
-                    _id: fileId,
-                    filename: req.file.originalname,
-                    contentType: req.file.mimetype,
-                    length: req.file.size,
-                    chunkSize: chunkInfo.chunkSize,
-                    uploadDate: new Date(),
-                    metadata: metadataObj,
-                    // Custom fields
-                    ...(req.body.uploadedBy && { uploadedBy: req.body.uploadedBy }),
-                    ...(req.body.category && { category: req.body.category }),
-                    ...(req.body.tags && {
-                        tags: typeof req.body.tags === 'string'
-                            ? req.body.tags.split(',').map(tag => tag.trim())
-                            : req.body.tags
-                    }),
-                    ...(req.body.isPublic !== undefined && {
-                        isPublic: typeof req.body.isPublic === 'string'
-                            ? req.body.isPublic.toLowerCase() === 'true'
-                            : Boolean(req.body.isPublic)
-                    })
-                });
-
-                await fileMetadata.save();
-
-                res.status(201).json({
+                return res.status(201).json({
                     success: true,
-                    fileId: fileId.toString(),
-                    filename: fileMetadata.filename,
-                    contentType: fileMetadata.contentType,
-                    length: fileMetadata.length,
-                    uploadDate: fileMetadata.uploadDate,
-                    metadata: fileMetadata.metadata
+                    fileId: result.fileId,
+                    filename: result.filename,
+                    contentType: result.contentType,
+                    length: result.length,
+                    uploadDate: result.uploadDate,
+                    metadata: result.metadata
                 });
 
             } catch (uploadError: any) {
-                console.error('Failed to upload file:', uploadError);
-                return res.status(500).json({
-                    error: "Failed to upload file",
-                    message: uploadError.message,
-                    code: "UPLOAD_ERROR"
-                });
+                // Map structured helper errors to HTTP responses
+                if (uploadError && uploadError.code === 'NO_FILE') {
+                    return res.status(400).json({ error: "No file uploaded", code: "NO_FILE" });
+                }
+
+                if (uploadError && uploadError.code === 'STORAGE_INITIALIZING') {
+                    return res.status(503).json({ error: "Storage service is initializing", code: "STORAGE_INITIALIZING" });
+                }
+
+                if (uploadError && uploadError.code === 'UPLOAD_ERROR') {
+                    console.error('Failed to upload file:', uploadError);
+                    return res.status(500).json({ error: "Failed to upload file", message: uploadError.message, code: "UPLOAD_ERROR" });
+                }
+
+                // Unexpected error: rethrow to outer catch
+                throw uploadError;
             }
 
         } catch (error: any) {
@@ -127,48 +88,49 @@ const createFileUploadHandler = (FileModel: mongoose.Model<any>): RequestHandler
 const createFileDownloadHandler = (FileModel: mongoose.Model<any>): RequestHandler => {
     return async (req: CustomRequest, res: Response | any) => {
         try {
-            const { fileId } = req.params;
+                const { fileId } = req.params;
 
-            // Validate file ID
-            if (!mongoose.Types.ObjectId.isValid(fileId)) {
-                return res.status(400).json({
-                    error: "Invalid file ID format",
-                    code: "INVALID_FILE_ID"
-                });
-            }
+                try {
+                    const { file: fileMetadata, buffer } = await getFileAndBuffer(FileModel, fileId);
 
-            // First check if file exists in our custom metadata collection
-            const fileMetadata = await FileModel.findById(fileId);
+                    // Set response headers
+                    res.set({
+                        'Content-Type': fileMetadata.contentType,
+                        'Content-Disposition': `inline; filename="${encodeURIComponent(fileMetadata.filename)}"`,
+                        'Content-Length': fileMetadata.length
+                    });
 
-            if (!fileMetadata) {
-                return res.status(404).json({
-                    error: "File not found",
-                    code: "FILE_NOT_FOUND"
-                });
-            }
+                    // Send the file
+                    res.send(buffer);
 
-            try {
-                // Read chunks directly
-                const fileBuffer = await readChunks(new mongoose.Types.ObjectId(fileId));
+                } catch (err: any) {
+                    // Map structured helper errors to HTTP responses
+                    if (err && err.code === 'INVALID_ID') {
+                        return res.status(400).json({
+                            error: "Invalid file ID format",
+                            code: "INVALID_FILE_ID"
+                        });
+                    }
 
-                // Set response headers
-                res.set({
-                    'Content-Type': fileMetadata.contentType,
-                    'Content-Disposition': `inline; filename="${encodeURIComponent(fileMetadata.filename)}"`,
-                    'Content-Length': fileMetadata.length
-                });
+                    if (err && err.code === 'NOT_FOUND') {
+                        return res.status(404).json({
+                            error: "File not found",
+                            code: "FILE_NOT_FOUND"
+                        });
+                    }
 
-                // Send the file
-                res.send(fileBuffer);
+                    if (err && err.code === 'READ_ERROR') {
+                        console.error('Failed to read file chunks:', err);
+                        return res.status(500).json({
+                            error: "Failed to read file",
+                            message: err.message,
+                            code: "READ_ERROR"
+                        });
+                    }
 
-            } catch (readError: any) {
-                console.error('Failed to read file chunks:', readError);
-                res.status(500).json({
-                    error: "Failed to read file",
-                    message: readError.message,
-                    code: "READ_ERROR"
-                });
-            }
+                    // Unexpected error: rethrow to outer catch
+                    throw err;
+                }
 
         } catch (error: any) {
             console.error('Download handler error:', error);
@@ -373,7 +335,18 @@ const createFileUpdateHandler = (FileModel: mongoose.Model<any>): RequestHandler
                     }
                 }
 
-                // Create new file metadata document
+                // Build custom fields: prefer request-provided values, fall back to old metadata
+                const coreFields = ['_id','filename','contentType','length','chunkSize','uploadDate','metadata'];
+                const allowedKeys = getTopLevelSchemaKeys(FileModel).filter((k: string) => !coreFields.includes(k));
+                const customFromReqOrOld: any = {};
+                for (const key of allowedKeys) {
+                    if (Object.prototype.hasOwnProperty.call(req.body, key)) {
+                        customFromReqOrOld[key] = req.body[key];
+                    } else if (oldFileMetadata[key] !== undefined) {
+                        customFromReqOrOld[key] = oldFileMetadata[key];
+                    }
+                }
+
                 const newFileMetadata = new FileModel({
                     _id: newFileId,
                     filename: req.file.originalname,
@@ -382,24 +355,7 @@ const createFileUpdateHandler = (FileModel: mongoose.Model<any>): RequestHandler
                     chunkSize: chunkInfo.chunkSize,
                     uploadDate: new Date(),
                     metadata: metadataObj,
-                    // Preserve or update custom fields
-                    ...(req.body.uploadedBy && { uploadedBy: req.body.uploadedBy }),
-                    ...(req.body.category && { category: req.body.category }),
-                    ...(req.body.tags && {
-                        tags: typeof req.body.tags === 'string'
-                            ? req.body.tags.split(',').map(tag => tag.trim())
-                            : req.body.tags
-                    }),
-                    ...(req.body.isPublic !== undefined && {
-                        isPublic: typeof req.body.isPublic === 'string'
-                            ? req.body.isPublic.toLowerCase() === 'true'
-                            : Boolean(req.body.isPublic)
-                    }),
-                    // Preserve fields from old file if not overridden
-                    ...(!req.body.uploadedBy && oldFileMetadata.uploadedBy && { uploadedBy: oldFileMetadata.uploadedBy }),
-                    ...(!req.body.category && oldFileMetadata.category && { category: oldFileMetadata.category }),
-                    ...(!req.body.tags && oldFileMetadata.tags && { tags: oldFileMetadata.tags }),
-                    ...(req.body.isPublic === undefined && oldFileMetadata.isPublic !== undefined && { isPublic: oldFileMetadata.isPublic })
+                    ...customFromReqOrOld
                 });
 
                 // Save new metadata
@@ -534,7 +490,25 @@ const createBulkUploadHandler = (FileModel: mongoose.Model<any>): RequestHandler
                                 }
                             }
 
-                            // Create new metadata document
+                            // Build custom fields for update: prefer per-file metadata or request-level values, fall back to existingFile
+                            const coreFields = ['_id','filename','contentType','length','chunkSize','uploadDate','metadata'];
+                            const sourceForCustom = { ...(req.body || {}), ...(file.metadata || {}) };
+                            if (req.user && req.user.id && !sourceForCustom.uploadedBy) {
+                                sourceForCustom.uploadedBy = req.user.id;
+                            }
+                            const customFromSource = pickModelFields(FileModel, sourceForCustom, { exclude: coreFields });
+
+                            // Ensure we preserve any existing fields not provided in sourceForCustom
+                            const allowedKeys = getTopLevelSchemaKeys(FileModel).filter((k: string) => !coreFields.includes(k));
+                            const finalCustom: any = {};
+                            for (const key of allowedKeys) {
+                                if (Object.prototype.hasOwnProperty.call(customFromSource, key)) {
+                                    finalCustom[key] = customFromSource[key];
+                                } else if (existingFile[key] !== undefined) {
+                                    finalCustom[key] = existingFile[key];
+                                }
+                            }
+
                             const newFileMetadata = new FileModel({
                                 _id: newFileId,
                                 filename: filename,
@@ -543,11 +517,7 @@ const createBulkUploadHandler = (FileModel: mongoose.Model<any>): RequestHandler
                                 chunkSize: chunkInfo.chunkSize,
                                 uploadDate: new Date(),
                                 metadata: metadataObj,
-                                // Preserve custom fields from old file
-                                uploadedBy: existingFile.uploadedBy,
-                                ...(existingFile.category && { category: existingFile.category }),
-                                ...(existingFile.tags && { tags: existingFile.tags }),
-                                ...(existingFile.isPublic !== undefined && { isPublic: existingFile.isPublic })
+                                ...finalCustom
                             });
 
                             await newFileMetadata.save();
@@ -634,21 +604,18 @@ const createBulkUploadHandler = (FileModel: mongoose.Model<any>): RequestHandler
                                 fileMetadataData.uploadedBy = req.user.id;
                             }
 
-                            // Add other custom fields from request if available
-                            const customFields = ['category', 'tags', 'isPublic'];
-                            customFields.forEach(field => {
-                                if (req.body[field] !== undefined) {
-                                    if (field === 'tags' && typeof req.body[field] === 'string') {
-                                        fileMetadataData[field] = req.body[field].split(',').map(tag => tag.trim());
-                                    } else if (field === 'isPublic' && typeof req.body[field] === 'string') {
-                                        fileMetadataData[field] = req.body[field].toLowerCase() === 'true';
-                                    } else {
-                                        fileMetadataData[field] = req.body[field];
-                                    }
-                                }
-                            });
+                            // Build custom fields from request-level and per-file metadata
+                            const coreFields2 = ['_id','filename','contentType','length','chunkSize','uploadDate','metadata'];
+                            const source = { ...(req.body || {}), ...(file.metadata || {}) };
+                            if (req.user && req.user.id && !source.uploadedBy) {
+                                source.uploadedBy = req.user.id;
+                            }
+                            const custom = pickModelFields(FileModel, source, { exclude: coreFields2 });
 
-                            const newFileMetadata = new FileModel(fileMetadataData);
+                            const newFileMetadata = new FileModel({
+                                ...fileMetadataData,
+                                ...custom
+                            });
                             await newFileMetadata.save();
 
                             results.push({
@@ -765,13 +732,32 @@ const createBulkUploadHandlerWithTransaction = (FileModel: mongoose.Model<any>):
                         }
                     );
 
-                    // Create new metadata
+                    // Build custom fields for transactional update
+                    const coreFields = ['_id','filename','contentType','length','chunkSize','uploadDate','metadata'];
+                    const sourceForCustom = { ...(req.body || {}), ...(file.metadata || {}) };
+                    if (req.user && req.user.id && !sourceForCustom.uploadedBy) {
+                        sourceForCustom.uploadedBy = req.user.id;
+                    }
+                    const customFromSource = pickModelFields(FileModel, sourceForCustom, { exclude: coreFields });
+                    // Preserve existing fields if not provided
+                    const allowedKeys = getTopLevelSchemaKeys(FileModel).filter((k: string) => !coreFields.includes(k));
+                    const finalCustom: any = {};
+                    for (const key of allowedKeys) {
+                        if (Object.prototype.hasOwnProperty.call(customFromSource, key)) {
+                            finalCustom[key] = customFromSource[key];
+                        } else if (existingFile[key] !== undefined) {
+                            finalCustom[key] = existingFile[key];
+                        }
+                    }
+
                     const newFileMetadata = new FileModel({
                         _id: newFileId,
                         filename,
                         contentType: file.mimetype,
                         length: file.size,
-                        // ... other fields
+                        uploadDate: new Date(),
+                        metadata: file.metadata || {},
+                        ...finalCustom
                     });
 
                     await newFileMetadata.save({ session });
@@ -802,12 +788,22 @@ const createBulkUploadHandlerWithTransaction = (FileModel: mongoose.Model<any>):
                         }
                     );
 
+                    // Build custom fields for transactional create
+                    const coreFields2 = ['_id','filename','contentType','length','chunkSize','uploadDate','metadata'];
+                    const source = { ...(req.body || {}), ...(file.metadata || {}) };
+                    if (req.user && req.user.id && !source.uploadedBy) {
+                        source.uploadedBy = req.user.id;
+                    }
+                    const custom = pickModelFields(FileModel, source, { exclude: coreFields2 });
+
                     const newFileMetadata = new FileModel({
                         _id: newFileId,
                         filename,
                         contentType: file.mimetype,
                         length: file.size,
-                        // ... other fields
+                        uploadDate: new Date(),
+                        metadata: file.metadata || {},
+                        ...custom
                     });
 
                     await newFileMetadata.save({ session });

@@ -1,6 +1,6 @@
 import * as mongoose from 'mongoose';
 import baseFileSchema from './fileSchema';
-import { toCapCase } from './../core/utils';
+import { toCapCase } from '@/lib/core/utils';
 
 
 /**
@@ -55,7 +55,9 @@ const createFilesModel = function(config: CreateFilesModelConfig = {modelSchema:
     const FilesSchema = new mongoose.Schema({
         ...baseFileSchema, ...config.modelSchema
     }, {
-        collection: (config.collection + '.files') // Custom collection name for GridFS
+        collection: (config.collection + '.files'), // Custom collection name for GridFS
+        strict: true,
+        strictQuery: true
     });
 
 
