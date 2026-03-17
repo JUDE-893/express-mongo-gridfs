@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
-import { writeChunks, readChunks, deleteChunks, chunksExist } from '@/lib/core/gridfsChunk';
-import { deleteFiles, getFileAndBuffer, updateFile, replaceFile } from '@/lib/core/operations';
+import { deleteFiles, getFileAndBuffer, updateFile, replaceFile, replaceFiles, replaceFilesWithTransaction } from '@/lib/core/operations.js';
+import { isGridFSReady } from '@/lib/core/gridfs.js';
 import { Request, Response, RequestHandler } from 'express';
 
 interface CustomRequest extends Request {
@@ -11,8 +11,6 @@ interface CustomRequest extends Request {
     query: any;
     params: any;
 }
-import { isGridFSReady } from '../core/gridfs.js';
-import { pickModelFields, getTopLevelSchemaKeys } from '@/lib/core/schemaUtils';
 
 /**
  * Handles single file uploads and saves metadata.
@@ -258,10 +256,6 @@ const createListFilesHandler = (FileModel: mongoose.Model<any>): RequestHandler 
     };
 };
 
-
-
-
-
 /**
  * Replaces an existing file and its metadata with a new one.
  * @param {mongoose.Model<any>} FileModel - Mongoose model for file metadata.
@@ -340,251 +334,13 @@ const createBulkUploadHandler = (FileModel: mongoose.Model<any>): RequestHandler
                 });
             }
 
-            const results: any[] = [];
-            const errors: any[] = [];
+            // Delegate bulk replace/create logic to core helper which is auth-agnostic.
+            // Any application-level user attribution should be provided in request body
+            // or per-file metadata; core helpers won't read req.user.
+            const result = await replaceFiles(FileModel, filesArray, req.body);
 
-            // Process each file
-            for (const file of filesArray) {
-                try {
-                    const filename = file.originalname;
-
-                    // Check if file with this filename exists
-                    // Note: You might want to add additional criteria (e.g., uploadedBy) 
-                    // to make the search more specific
-                    let existingFile = null;
-
-                    // Option 1: Search by filename only (as in the example)
-                    existingFile = await FileModel.findOne({ filename });
-
-                    // Option 2: Search by filename AND uploadedBy (if user-specific)
-                    // if (req.user && req.user.id) {
-                    //     existingFile = await FileModel.findOne({ 
-                    //         filename, 
-                    //         uploadedBy: req.user.id 
-                    //     });
-                    // } else {
-                    //     existingFile = await FileModel.findOne({ filename });
-                    // }
-
-                    if (existingFile) {
-                        // UPDATE EXISTING FILE
-                        const oldFileId = existingFile._id;
-                        const newFileId = new mongoose.Types.ObjectId();
-
-                        // Check if old chunks exist
-                        const oldChunksExist = await chunksExist(oldFileId.toString());
-
-                        try {
-                            // Write new chunks
-                            const chunkInfo = await writeChunks(
-                                newFileId,
-                                filename,
-                                file.buffer,
-                                {
-                                    contentType: file.mimetype,
-                                    metadata: file.metadata || {}
-                                }
-                            );
-
-                            // Parse metadata from file if available
-                            let metadataObj = {};
-                            if (file.metadata) {
-                                try {
-                                    metadataObj = typeof file.metadata === 'string'
-                                        ? JSON.parse(file.metadata)
-                                        : file.metadata;
-                                } catch (e: any) {
-                                    console.warn('Failed to parse metadata for file:', filename, e);
-                                }
-                            }
-
-                            // Build custom fields for update: prefer per-file metadata or request-level values, fall back to existingFile
-                            const coreFields = ['_id','filename','contentType','length','chunkSize','uploadDate','metadata'];
-                            const sourceForCustom = { ...(req.body || {}), ...(file.metadata || {}) };
-                            if (req.user && req.user.id && !sourceForCustom.uploadedBy) {
-                                sourceForCustom.uploadedBy = req.user.id;
-                            }
-                            const customFromSource = pickModelFields(FileModel, sourceForCustom, { exclude: coreFields });
-
-                            // Ensure we preserve any existing fields not provided in sourceForCustom
-                            const allowedKeys = getTopLevelSchemaKeys(FileModel).filter((k: string) => !coreFields.includes(k));
-                            const finalCustom: any = {};
-                            for (const key of allowedKeys) {
-                                if (Object.prototype.hasOwnProperty.call(customFromSource, key)) {
-                                    finalCustom[key] = customFromSource[key];
-                                } else if (existingFile[key] !== undefined) {
-                                    finalCustom[key] = existingFile[key];
-                                }
-                            }
-
-                            const newFileMetadata = new FileModel({
-                                _id: newFileId,
-                                filename: filename,
-                                contentType: file.mimetype,
-                                length: file.size,
-                                chunkSize: chunkInfo.chunkSize,
-                                uploadDate: new Date(),
-                                metadata: metadataObj,
-                                ...finalCustom
-                            });
-
-                            await newFileMetadata.save();
-
-                            // Delete old chunks
-                            if (oldChunksExist) {
-                                try {
-                                    await deleteChunks(oldFileId.toString());
-                                } catch (deleteError: any) {
-                                    console.error(`Error deleting old chunks for ${filename}:`, deleteError);
-                                }
-                            }
-
-                            // Delete old metadata
-                            await FileModel.findByIdAndDelete(oldFileId);
-
-                            results.push({
-                                filename,
-                                action: "updated",
-                                fileId: newFileId.toString(),
-                                oldFileId: oldFileId.toString(),
-                                contentType: file.mimetype,
-                                length: file.size
-                            });
-
-                        } catch (updateError: any) {
-                            console.error(`Failed to update file ${filename}:`, updateError);
-
-                            // Clean up new chunks if update failed
-                            try {
-                                await deleteChunks(newFileId.toString());
-                            } catch (cleanupError: any) {
-                                console.error(`Error cleaning up failed update for ${filename}:`, cleanupError);
-                            }
-
-                            errors.push({
-                                filename,
-                                action: "error",
-                                error: updateError.message
-                            });
-                        }
-
-                    } else {
-                        // CREATE NEW FILE
-                        const newFileId = new mongoose.Types.ObjectId();
-
-                        try {
-                            // Write chunks
-                            const chunkInfo = await writeChunks(
-                                newFileId,
-                                filename,
-                                file.buffer,
-                                {
-                                    contentType: file.mimetype,
-                                    metadata: file.metadata || {}
-                                }
-                            );
-
-                            // Parse metadata
-                            let metadataObj = {};
-                            if (file.metadata) {
-                                try {
-                                    metadataObj = typeof file.metadata === 'string'
-                                        ? JSON.parse(file.metadata)
-                                        : file.metadata;
-                                } catch (e: any) {
-                                    console.warn('Failed to parse metadata for file:', filename, e);
-                                }
-                            }
-
-                            // Prepare metadata for new file
-                            const fileMetadataData: any = {
-                                _id: newFileId,
-                                filename: filename,
-                                contentType: file.mimetype,
-                                length: file.size,
-                                chunkSize: chunkInfo.chunkSize,
-                                uploadDate: new Date(),
-                                metadata: metadataObj
-                            };
-
-                            // Add user ID if available
-                            if (req.user && req.user.id) {
-                                fileMetadataData.uploadedBy = req.user.id;
-                            }
-
-                            // Build custom fields from request-level and per-file metadata
-                            const coreFields2 = ['_id','filename','contentType','length','chunkSize','uploadDate','metadata'];
-                            const source = { ...(req.body || {}), ...(file.metadata || {}) };
-                            if (req.user && req.user.id && !source.uploadedBy) {
-                                source.uploadedBy = req.user.id;
-                            }
-                            const custom = pickModelFields(FileModel, source, { exclude: coreFields2 });
-
-                            const newFileMetadata = new FileModel({
-                                ...fileMetadataData,
-                                ...custom
-                            });
-                            await newFileMetadata.save();
-
-                            results.push({
-                                filename,
-                                action: "created",
-                                fileId: newFileId.toString(),
-                                contentType: file.mimetype,
-                                length: file.size
-                            });
-
-                        } catch (createError: any) {
-                            console.error(`Failed to create file ${filename}:`, createError);
-
-                            // Clean up chunks if creation failed
-                            try {
-                                await deleteChunks(newFileId.toString());
-                            } catch (cleanupError: any) {
-                                console.error(`Error cleaning up failed creation for ${filename}:`, cleanupError);
-                            }
-
-                            errors.push({
-                                filename,
-                                action: "error",
-                                error: createError.message
-                            });
-                        }
-                    }
-
-                } catch (fileError: any) {
-                    console.error(`Error processing file ${file.originalname}:`, fileError);
-                    errors.push({
-                        filename: file.originalname,
-                        action: "error",
-                        error: fileError.message
-                    });
-                }
-            }
-
-            // Prepare response
-            const successful = results.filter(r => !r.error).length;
-            const failed = errors.length;
-
-            const response: any = {
-                success: failed === 0,
-                message: "Bulk upload completed",
-                summary: {
-                    total: filesArray.length,
-                    successful,
-                    failed
-                }
-            };
-
-            if (results.length > 0) {
-                response.results = results;
-            }
-
-            if (errors.length > 0) {
-                response.errors = errors;
-            }
-
-            res.status(failed === 0 ? 200 : 207).json(response); // 207 Multi-Status if partial failures
+            const statusCode = (result.errors && result.errors.length > 0) ? 207 : 200;
+            return res.status(statusCode).json(result);
 
         } catch (error: any) {
             console.error('Bulk upload handler error:', error);
@@ -604,145 +360,40 @@ const createBulkUploadHandler = (FileModel: mongoose.Model<any>): RequestHandler
  */
 const createBulkUploadHandlerWithTransaction = (FileModel: mongoose.Model<any>): RequestHandler => {
     return async (req: CustomRequest, res: Response | any) => {
-        const session = await mongoose.startSession();
-
         try {
-            session.startTransaction();
-
             const filesArray = Array.isArray(req.files) ? req.files : Object.values(req.files || {}).flat();
             if (!filesArray || filesArray.length === 0) {
-                await session.abortTransaction();
                 return res.status(400).json({
                     error: "No files uploaded",
                     code: "NO_FILES"
                 });
             }
 
-            const results: any[] = [];
+            try {
+                const result = await replaceFilesWithTransaction(FileModel, filesArray, req.body);
 
-            for (const file of filesArray) {
-                const filename = file.originalname;
-                const existingFile = await FileModel.findOne({ filename }).session(session);
+                const statusCode = (result.errors && result.errors.length > 0) ? 207 : 200;
+                return res.status(statusCode).json(result);
 
-                if (existingFile) {
-                    // Update logic within transaction
-                    const oldFileId = existingFile._id;
-                    const newFileId = new mongoose.Types.ObjectId();
-
-                    // Write new chunks
-                    await writeChunks(
-                        newFileId,
-                        filename,
-                        file.buffer,
-                        {
-                            contentType: file.mimetype,
-                            metadata: file.metadata || {}
-                        }
-                    );
-
-                    // Build custom fields for transactional update
-                    const coreFields = ['_id','filename','contentType','length','chunkSize','uploadDate','metadata'];
-                    const sourceForCustom = { ...(req.body || {}), ...(file.metadata || {}) };
-                    if (req.user && req.user.id && !sourceForCustom.uploadedBy) {
-                        sourceForCustom.uploadedBy = req.user.id;
-                    }
-                    const customFromSource = pickModelFields(FileModel, sourceForCustom, { exclude: coreFields });
-                    // Preserve existing fields if not provided
-                    const allowedKeys = getTopLevelSchemaKeys(FileModel).filter((k: string) => !coreFields.includes(k));
-                    const finalCustom: any = {};
-                    for (const key of allowedKeys) {
-                        if (Object.prototype.hasOwnProperty.call(customFromSource, key)) {
-                            finalCustom[key] = customFromSource[key];
-                        } else if (existingFile[key] !== undefined) {
-                            finalCustom[key] = existingFile[key];
-                        }
-                    }
-
-                    const newFileMetadata = new FileModel({
-                        _id: newFileId,
-                        filename,
-                        contentType: file.mimetype,
-                        length: file.size,
-                        uploadDate: new Date(),
-                        metadata: file.metadata || {},
-                        ...finalCustom
-                    });
-
-                    await newFileMetadata.save({ session });
-
-                    // Delete old chunks
-                    await deleteChunks(oldFileId.toString());
-
-                    // Delete old metadata
-                    await FileModel.findByIdAndDelete(oldFileId, { session });
-
-                    results.push({
-                        filename,
-                        action: "updated",
-                        fileId: newFileId.toString()
-                    });
-
-                } else {
-                    // Create logic within transaction
-                    const newFileId = new mongoose.Types.ObjectId();
-
-                    await writeChunks(
-                        newFileId,
-                        filename,
-                        file.buffer,
-                        {
-                            contentType: file.mimetype,
-                            metadata: file.metadata || {}
-                        }
-                    );
-
-                    // Build custom fields for transactional create
-                    const coreFields2 = ['_id','filename','contentType','length','chunkSize','uploadDate','metadata'];
-                    const source = { ...(req.body || {}), ...(file.metadata || {}) };
-                    if (req.user && req.user.id && !source.uploadedBy) {
-                        source.uploadedBy = req.user.id;
-                    }
-                    const custom = pickModelFields(FileModel, source, { exclude: coreFields2 });
-
-                    const newFileMetadata = new FileModel({
-                        _id: newFileId,
-                        filename,
-                        contentType: file.mimetype,
-                        length: file.size,
-                        uploadDate: new Date(),
-                        metadata: file.metadata || {},
-                        ...custom
-                    });
-
-                    await newFileMetadata.save({ session });
-
-                    results.push({
-                        filename,
-                        action: "created",
-                        fileId: newFileId.toString()
-                    });
+            } catch (err: any) {
+                console.error('Bulk upload transaction error:', err);
+                if (err && err.code === 'INVALID_MODEL') {
+                    return res.status(500).json({ error: "Invalid model", code: "INVALID_MODEL" });
                 }
+                return res.status(500).json({
+                    error: "Bulk upload failed",
+                    message: err?.message || String(err),
+                    code: "TRANSACTION_ERROR"
+                });
             }
 
-            await session.commitTransaction();
-
-            res.status(200).json({
-                success: true,
-                message: "Bulk upload completed",
-                results,
-                total: results.length
-            });
-
         } catch (error: any) {
-            await session.abortTransaction();
-            console.error('Bulk upload transaction error:', error);
+            console.error('Bulk upload handler error:', error);
             res.status(500).json({
-                error: "Bulk upload failed",
+                error: "Server error during bulk upload",
                 message: error.message,
-                code: "TRANSACTION_ERROR"
+                code: "BULK_UPLOAD_ERROR"
             });
-        } finally {
-            session.endSession();
         }
     };
 };

@@ -292,12 +292,10 @@ const updateFile = async (FileModel: any, file: any, requestBody: any): Promise<
 
 // Export the helper
 export { 
-    deleteFiles,
-    deleteFile,
-    getFileAndBuffer
+    
  };
 
-export { updateFile };
+export {  };
 
 /**
  * Replace an existing file (chunks + metadata) with a new file.
@@ -311,10 +309,15 @@ export { updateFile };
  * @returns {Promise<any>} Resolves with details about the replaced file.
  * @throws {{code:string, message:string}} Structured errors: INVALID_ID, OLD_FILE_NOT_FOUND, WRITE_ERROR, SAVE_METADATA_ERROR
  */
-const replaceFile = async (FileModel: any, oldFileIdStr: any, file: any, requestBody: any): Promise<any> => {
+// Internal single-file replace implementation. Exported wrapper `replaceFile`
+// will call `replaceFiles` which in turn may call this helper for id-based
+// replacements. Keeping the implementation here avoids duplicating logic.
+const replaceOneImpl = async (FileModel: any, oldFileIdStr: any, file: any, requestBody: any, options?: any): Promise<any> => {
     if (!FileModel || typeof FileModel.findById !== 'function') {
         throw { code: 'INVALID_MODEL', message: 'Invalid FileModel provided' };
     }
+
+    const session = options?.session;
 
     const idStr = oldFileIdStr?.toString?.();
     if (!idStr || !mongoose.Types.ObjectId.isValid(idStr)) {
@@ -327,8 +330,10 @@ const replaceFile = async (FileModel: any, oldFileIdStr: any, file: any, request
 
     const oldObjectId = new mongoose.Types.ObjectId(idStr);
 
-    // Fetch old metadata
-    const oldFileMetadata = await FileModel.findById(oldObjectId);
+    // Fetch old metadata (use session if provided)
+    const oldFileMetadata = session
+        ? await FileModel.findById(oldObjectId).session(session)
+        : await FileModel.findById(oldObjectId);
     if (!oldFileMetadata) {
         throw { code: 'OLD_FILE_NOT_FOUND', message: 'Old file metadata not found' };
     }
@@ -393,7 +398,12 @@ const replaceFile = async (FileModel: any, oldFileIdStr: any, file: any, request
             ...customFromReqOrOld
         });
 
-        await newFileMetadata.save();
+        // Save metadata with session if provided
+        if (session) {
+            await newFileMetadata.save({ session });
+        } else {
+            await newFileMetadata.save();
+        }
 
         const warnings: string[] = [];
 
@@ -407,8 +417,12 @@ const replaceFile = async (FileModel: any, oldFileIdStr: any, file: any, request
             }
         }
 
-        // Delete old metadata
-        await FileModel.findByIdAndDelete(oldObjectId);
+        // Delete old metadata (use session if provided)
+        if (session) {
+            await FileModel.findByIdAndDelete(oldObjectId).session(session);
+        } else {
+            await FileModel.findByIdAndDelete(oldObjectId);
+        }
 
         const result = {
             success: true,
@@ -425,7 +439,7 @@ const replaceFile = async (FileModel: any, oldFileIdStr: any, file: any, request
 
         if (warnings.length > 0) result.warnings = warnings;
 
-        return result;
+    return result;
 
     } catch (err: any) {
         // Attempt cleanup of new chunks
@@ -439,5 +453,317 @@ const replaceFile = async (FileModel: any, oldFileIdStr: any, file: any, request
     }
 };
 
-export { replaceFile };
+/**
+ * Replace/create multiple files in bulk. Accepts either a single file object
+ * or an array of file objects. Each file object should have the shape used
+ * by multer: { originalname, buffer, mimetype, size, metadata? }.
+ *
+ * Behavior:
+ * - If an entry contains an explicit `id` (or `_id`) property it will call
+ *   the single-file replace implementation which replaces by id.
+ * - Otherwise the helper will try to find an existing file by `filename`
+ *   (originalname) and update it. If none exists it will create a new file.
+ * - This helper is auth-agnostic and does not read `req.user`.
+ */
+const replaceFiles = async (FileModel: any, files: any, requestBody?: any, options?: any): Promise<any> => {
+    const session = options?.session;
+
+    if (!files || (Array.isArray(files) && files.length === 0)) {
+        return {
+            success: true,
+            message: 'No files provided',
+            summary: { total: 0, created: 0, updated: 0, failed: 0 }
+        };
+    }
+
+    // Normalize to array
+    const filesArray = Array.isArray(files) ? files : [files];
+
+    // Validate FileModel
+    if (!FileModel || typeof FileModel.find === 'undefined') {
+        throw { code: 'INVALID_MODEL', message: 'Invalid FileModel provided' };
+    }
+
+    const results: any[] = [];
+    const errors: any[] = [];
+
+    for (const entry of filesArray) {
+        try {
+            // Support wrapper shape: { id, file, requestBody? }
+            if (entry && (entry.id || entry._id)) {
+                const idStr = entry.id || entry._id;
+                const fileObj = entry.file || entry;
+                const res = await replaceOneImpl(FileModel, idStr, fileObj, entry.requestBody || requestBody || {}, options);
+                results.push({ filename: fileObj?.originalname || res?.newFile?.filename, action: 'updated', fileId: res.newFile.fileId, oldFileId: res.oldFileId });
+                continue;
+            }
+
+            // Otherwise expect a multer-style file object
+            const fileObj = entry;
+            const filename = fileObj?.originalname;
+            if (!filename) {
+                errors.push({ filename: null, action: 'error', error: 'Missing filename' });
+                continue;
+            }
+
+            // Try to find an existing file by filename (use session when provided)
+            const existingFile = session
+                ? await FileModel.findOne({ filename }).session(session)
+                : await FileModel.findOne({ filename });
+
+            if (existingFile) {
+                // Replace existing file (create new chunks + metadata, delete old chunks & metadata)
+                const oldFileId = existingFile._id;
+                const newFileId = new mongoose.Types.ObjectId();
+
+                try {
+                    const chunkInfo = await writeChunks(
+                        newFileId,
+                        filename,
+                        fileObj.buffer,
+                        {
+                            contentType: fileObj.mimetype,
+                            metadata: fileObj.metadata || requestBody?.metadata || {}
+                        }
+                    );
+
+                    // Parse per-file metadata if provided as string
+                    let metadataObj: any = {};
+                    if (fileObj && fileObj.metadata) {
+                        try {
+                            metadataObj = typeof fileObj.metadata === 'string' ? JSON.parse(fileObj.metadata) : fileObj.metadata;
+                        } catch (e: any) {
+                            console.warn('replaceFiles: failed to parse metadata for', filename, e?.message || e);
+                        }
+                    } else if (requestBody && requestBody.metadata) {
+                        try {
+                            metadataObj = typeof requestBody.metadata === 'string' ? JSON.parse(requestBody.metadata) : requestBody.metadata;
+                        } catch (e: any) {
+                            console.warn('replaceFiles: failed to parse request-level metadata for', filename, e?.message || e);
+                        }
+                    }
+
+                    // Build custom fields: prefer request-provided values, fall back to existingFile
+                    const coreFields = ['_id','filename','contentType','length','chunkSize','uploadDate','metadata'];
+                    const sourceForCustom = { ...(requestBody || {}), ...(fileObj.metadata || {}) };
+                    const customFromSource = pickModelFields(FileModel, sourceForCustom, { exclude: coreFields });
+
+                    const allowedKeys = getTopLevelSchemaKeys(FileModel).filter((k: string) => !coreFields.includes(k));
+                    const finalCustom: any = {};
+                    for (const key of allowedKeys) {
+                        if (Object.prototype.hasOwnProperty.call(customFromSource, key)) {
+                            finalCustom[key] = customFromSource[key];
+                        } else if (existingFile[key] !== undefined) {
+                            finalCustom[key] = existingFile[key];
+                        }
+                    }
+
+                    const newFileMetadata = new FileModel({
+                        _id: newFileId,
+                        filename,
+                        contentType: fileObj.mimetype,
+                        length: fileObj.size,
+                        chunkSize: chunkInfo.chunkSize,
+                        uploadDate: new Date(),
+                        metadata: metadataObj,
+                        ...finalCustom
+                    });
+
+                    // Save metadata using session when provided
+                    if (session) {
+                        await newFileMetadata.save({ session });
+                    } else {
+                        await newFileMetadata.save();
+                    }
+
+                    // Delete old chunks (best-effort)
+                    try {
+                        const oldChunksExist = await chunksExist(oldFileId.toString());
+                        if (oldChunksExist) {
+                            await deleteChunks(oldFileId.toString());
+                        }
+                    } catch (e: any) {
+                        console.error('replaceFiles: failed to delete old chunks for', filename, e?.message || e);
+                    }
+
+                    // Delete old metadata (use session if provided)
+                    if (session) {
+                        await FileModel.findByIdAndDelete(oldFileId).session(session);
+                    } else {
+                        await FileModel.findByIdAndDelete(oldFileId);
+                    }
+
+                    results.push({ filename, action: 'updated', fileId: newFileId.toString(), oldFileId: oldFileId.toString(), contentType: fileObj.mimetype, length: fileObj.size });
+
+                } catch (updateError: any) {
+                    // Cleanup new chunks
+                    try {
+                        await deleteChunks(newFileId.toString());
+                    } catch (cleanupError: any) {
+                        console.error('replaceFiles: cleanup failed for', filename, cleanupError);
+                    }
+
+                    errors.push({ filename, action: 'error', error: updateError?.message || String(updateError) });
+                }
+
+            } else {
+                // Create new file
+                const newFileId = new mongoose.Types.ObjectId();
+
+                try {
+                    const chunkInfo = await writeChunks(
+                        newFileId,
+                        filename,
+                        fileObj.buffer,
+                        {
+                            contentType: fileObj.mimetype,
+                            metadata: fileObj.metadata || requestBody?.metadata || {}
+                        }
+                    );
+
+                    // Parse metadata
+                    let metadataObj: any = {};
+                    if (fileObj && fileObj.metadata) {
+                        try {
+                            metadataObj = typeof fileObj.metadata === 'string' ? JSON.parse(fileObj.metadata) : fileObj.metadata;
+                        } catch (e: any) {
+                            console.warn('replaceFiles: failed to parse metadata for', filename, e?.message || e);
+                        }
+                    } else if (requestBody && requestBody.metadata) {
+                        try {
+                            metadataObj = typeof requestBody.metadata === 'string' ? JSON.parse(requestBody.metadata) : requestBody.metadata;
+                        } catch (e: any) {
+                            console.warn('replaceFiles: failed to parse request-level metadata for', filename, e?.message || e);
+                        }
+                    }
+
+                    const coreFields2 = ['_id','filename','contentType','length','chunkSize','uploadDate','metadata'];
+                    const source = { ...(requestBody || {}), ...(fileObj.metadata || {}) };
+                    const custom = pickModelFields(FileModel, source, { exclude: coreFields2 });
+
+                    const newFileMetadata = new FileModel({
+                        _id: newFileId,
+                        filename,
+                        contentType: fileObj.mimetype,
+                        length: fileObj.size,
+                        chunkSize: chunkInfo.chunkSize,
+                        uploadDate: new Date(),
+                        metadata: metadataObj,
+                        ...custom
+                    });
+
+                    // Save metadata using session when provided
+                    if (session) {
+                        await newFileMetadata.save({ session });
+                    } else {
+                        await newFileMetadata.save();
+                    }
+
+                    results.push({ filename, action: 'created', fileId: newFileId.toString(), contentType: fileObj.mimetype, length: fileObj.size });
+
+                } catch (createError: any) {
+                    // Cleanup chunks
+                    try {
+                        await deleteChunks(newFileId.toString());
+                    } catch (cleanupError: any) {
+                        console.error('replaceFiles: cleanup failed for new file', filename, cleanupError);
+                    }
+
+                    errors.push({ filename, action: 'error', error: createError?.message || String(createError) });
+                }
+            }
+
+        } catch (fileError: any) {
+            errors.push({ filename: fileError?.filename || null, action: 'error', error: fileError?.message || String(fileError) });
+        }
+    }
+
+    const summary = {
+        total: filesArray.length,
+        created: results.filter(r => r.action === 'created').length,
+        updated: results.filter(r => r.action === 'updated').length,
+        failed: errors.length
+    };
+
+    const response: any = {
+        success: errors.length === 0,
+        message: 'Bulk replace completed',
+        summary
+    };
+
+    if (results.length > 0) response.results = results;
+    if (errors.length > 0) response.errors = errors;
+
+    return response;
+};
+
+// Thin wrapper: replace a single file by delegating to replaceFiles for a single-entry array.
+const replaceFile = async (FileModel: any, oldFileIdStr: any, file: any, requestBody: any): Promise<any> => {
+    const resp = await replaceFiles(FileModel, [{ id: oldFileIdStr, file, requestBody }], requestBody);
+    // If there were errors, try to map them to structured errors similar to original behavior
+    if (resp.errors && resp.errors.length > 0) {
+        const err = resp.errors[0];
+        // If old file not found, mimic previous code
+        if (err.error && typeof err.error === 'string' && err.error.includes('Old file metadata not found')) {
+            throw { code: 'OLD_FILE_NOT_FOUND', message: 'Old file metadata not found' };
+        }
+        throw { code: 'WRITE_ERROR', message: err.error || 'Failed to replace file' };
+    }
+
+    // Return the single success result in the shape expected by routers
+    const r = resp.results && resp.results[0];
+    return {
+        success: true,
+        oldFileId: r?.oldFileId,
+        newFile: {
+            fileId: r?.fileId,
+            filename: r?.filename,
+            contentType: r?.contentType,
+            length: r?.length,
+            uploadDate: r?.uploadDate,
+            metadata: r?.metadata
+        }
+    };
+};
+
+/**
+ * Convenience wrapper that runs replaceFiles inside a mongoose transaction.
+ * Starts a session, commits on success, aborts on failure and returns/throws
+ * structured errors consistent with other helpers.
+ */
+const replaceFilesWithTransaction = async (FileModel: any, files: any, requestBody?: any): Promise<any> => {
+    if (!FileModel || typeof FileModel.find === 'undefined') {
+        throw { code: 'INVALID_MODEL', message: 'Invalid FileModel provided' };
+    }
+
+    const session = await mongoose.startSession();
+    try {
+        session.startTransaction();
+
+        const resp = await replaceFiles(FileModel, files, requestBody, { session });
+
+        await session.commitTransaction();
+
+        return resp;
+    } catch (err: any) {
+        try {
+            await session.abortTransaction();
+        } catch (e: any) {
+            console.error('replaceFilesWithTransaction: abortTransaction failed', e?.message || e);
+        }
+        throw { code: 'TRANSACTION_ERROR', message: err?.message || String(err) };
+    } finally {
+        session.endSession();
+    }
+};
+
+export { 
+    updateFile,
+     deleteFiles,
+    deleteFile,
+    getFileAndBuffer,
+    replaceFiles,
+    replaceFile,
+    replaceFilesWithTransaction
+};
 

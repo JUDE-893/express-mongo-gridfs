@@ -1,7 +1,6 @@
 import * as mongoose from 'mongoose';
-import baseFileSchema from './fileSchema';
-import { toCapCase } from '@/lib/core/utils';
-
+import baseFileSchema from '@/lib/model/fileSchema.js';
+import { toCapCase } from '@/lib/core/utils.js';
 
 /**
  * Create and return a Mongoose model for file documents (GridFS-style files collection).
