@@ -5,20 +5,36 @@
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "start": "node index.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "start": "node ./dist/index.js",
+    "test": "tsx tests/router/service/unittest.test.ts"
   },
   "author": "JUDE-893",
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "express": "^5.2.1",
+    "express-mongo-gridfs": "^1.0.0",
     "mongodb": "^7.1.0",
-    "mongoose": "^9.3.0"
+    "mongoose": "^9.3.0",
+    "multer": "^2.1.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
+    "@types/multer": "^2.1.0",
     "@types/node": "^25.5.0",
+    "tsx": "^4.20.5",
     "typescript": "^5.9.3"
   }
 }
