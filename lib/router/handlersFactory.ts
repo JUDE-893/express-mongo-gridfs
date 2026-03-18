@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
-import { deleteFiles, getFileAndBuffer, updateFile, replaceFile, replaceFiles, replaceFilesWithTransaction } from '@/lib/core/operations.js';
-import { isGridFSReady } from '@/lib/core/gridfs.js';
+import { deleteFiles, getFileAndBuffer, uploadFile, replaceFile, replaceFiles, replaceFilesWithTransaction } from '../core/operations.js';
+import { isGridFSReady } from '../core/gridfs.js';
 import { Request, Response, RequestHandler } from 'express';
 
 interface CustomRequest extends Request {
@@ -36,7 +36,7 @@ const createFileUploadHandler = (FileModel: mongoose.Model<any>): RequestHandler
             }
 
             try {
-                const result = await updateFile(FileModel, req.file, req.body);
+                const result = await uploadFile(FileModel, req.file, req.body);
 
                 return res.status(201).json({
                     success: true,
@@ -86,49 +86,49 @@ const createFileUploadHandler = (FileModel: mongoose.Model<any>): RequestHandler
 const createFileDownloadHandler = (FileModel: mongoose.Model<any>): RequestHandler => {
     return async (req: CustomRequest, res: Response | any) => {
         try {
-                const { fileId } = req.params;
+            const { fileId } = req.params;
 
-                try {
-                    const { file: fileMetadata, buffer } = await getFileAndBuffer(FileModel, fileId);
+            try {
+                const { file: fileMetadata, buffer } = await getFileAndBuffer(FileModel, fileId);
 
-                    // Set response headers
-                    res.set({
-                        'Content-Type': fileMetadata.contentType,
-                        'Content-Disposition': `inline; filename="${encodeURIComponent(fileMetadata.filename)}"`,
-                        'Content-Length': fileMetadata.length
+                // Set response headers
+                res.set({
+                    'Content-Type': fileMetadata.contentType,
+                    'Content-Disposition': `inline; filename="${encodeURIComponent(fileMetadata.filename)}"`,
+                    'Content-Length': fileMetadata.length
+                });
+
+                // Send the file
+                res.send(buffer);
+
+            } catch (err: any) {
+                // Map structured helper errors to HTTP responses
+                if (err && err.code === 'INVALID_ID') {
+                    return res.status(400).json({
+                        error: "Invalid file ID format",
+                        code: "INVALID_FILE_ID"
                     });
-
-                    // Send the file
-                    res.send(buffer);
-
-                } catch (err: any) {
-                    // Map structured helper errors to HTTP responses
-                    if (err && err.code === 'INVALID_ID') {
-                        return res.status(400).json({
-                            error: "Invalid file ID format",
-                            code: "INVALID_FILE_ID"
-                        });
-                    }
-
-                    if (err && err.code === 'NOT_FOUND') {
-                        return res.status(404).json({
-                            error: "File not found",
-                            code: "FILE_NOT_FOUND"
-                        });
-                    }
-
-                    if (err && err.code === 'READ_ERROR') {
-                        console.error('Failed to read file chunks:', err);
-                        return res.status(500).json({
-                            error: "Failed to read file",
-                            message: err.message,
-                            code: "READ_ERROR"
-                        });
-                    }
-
-                    // Unexpected error: rethrow to outer catch
-                    throw err;
                 }
+
+                if (err && err.code === 'NOT_FOUND') {
+                    return res.status(404).json({
+                        error: "File not found",
+                        code: "FILE_NOT_FOUND"
+                    });
+                }
+
+                if (err && err.code === 'READ_ERROR') {
+                    console.error('Failed to read file chunks:', err);
+                    return res.status(500).json({
+                        error: "Failed to read file",
+                        message: err.message,
+                        code: "READ_ERROR"
+                    });
+                }
+
+                // Unexpected error: rethrow to outer catch
+                throw err;
+            }
 
         } catch (error: any) {
             console.error('Download handler error:', error);
@@ -194,7 +194,6 @@ const createListFilesHandler = (FileModel: mongoose.Model<any>): RequestHandler 
             } catch (err) {
                 decoded = filters.filename as string;
             }
-            console.log("🚀 ~ createListFilesHandler ~ decoded:", decoded)
 
             // Build query
             const query: any = {};

@@ -208,7 +208,7 @@ const getFileAndBuffer = async (FileModel: any, fileId: any): Promise<any> => {
  * @returns {Promise<any>} Resolves with details about the saved file.
  * @throws {{code:string, message:string}} Structured errors: NO_FILE, STORAGE_INITIALIZING, UPLOAD_ERROR
  */
-const updateFile = async (FileModel: any, file: any, requestBody: any): Promise<any> => {
+const uploadFile = async (FileModel: any, file: any, requestBody: any): Promise<any> => {
     if (!FileModel || typeof FileModel.findById !== 'function') {
         throw { code: 'INVALID_MODEL', message: 'Invalid FileModel provided' };
     }
@@ -244,14 +244,14 @@ const updateFile = async (FileModel: any, file: any, requestBody: any): Promise<
                     : requestBody.metadata;
             } catch (e: any) {
                 // preserve old behavior: log and continue with empty metadata
-                console.warn('updateFile: failed to parse metadata:', e?.message || e);
+                console.warn('uploadFile: failed to parse metadata:', e?.message || e);
             }
         } else if (file && file.metadata) {
             metadataObj = file.metadata;
         }
 
         // Build custom fields from requestBody while excluding core fields
-        const coreFields = ['_id','filename','contentType','length','chunkSize','uploadDate','metadata'];
+        const coreFields = ['_id', 'filename', 'contentType', 'length', 'chunkSize', 'uploadDate', 'metadata'];
         const customFromReq = pickModelFields(FileModel, requestBody || {}, { exclude: coreFields });
 
         const fileMetadata = new FileModel({
@@ -283,19 +283,13 @@ const updateFile = async (FileModel: any, file: any, requestBody: any): Promise<
         try {
             await deleteChunks(fileId.toString());
         } catch (cleanupErr: any) {
-            console.error('updateFile: cleanup failed for chunks:', cleanupErr);
+            console.error('uploadFile: cleanup failed for chunks:', cleanupErr);
         }
 
         throw { code: 'UPLOAD_ERROR', message: err?.message || String(err) };
     }
 };
 
-// Export the helper
-export { 
-    
- };
-
-export {  };
 
 /**
  * Replace an existing file (chunks + metadata) with a new file.
@@ -376,7 +370,7 @@ const replaceOneImpl = async (FileModel: any, oldFileIdStr: any, file: any, requ
         }
 
         // Build custom fields: prefer request-provided values, fall back to old metadata
-        const coreFields = ['_id','filename','contentType','length','chunkSize','uploadDate','metadata'];
+        const coreFields = ['_id', 'filename', 'contentType', 'length', 'chunkSize', 'uploadDate', 'metadata'];
         const allowedKeys = getTopLevelSchemaKeys(FileModel).filter((k: string) => !coreFields.includes(k));
         const customFromReqOrOld: any = {};
         for (const key of allowedKeys) {
@@ -439,7 +433,7 @@ const replaceOneImpl = async (FileModel: any, oldFileIdStr: any, file: any, requ
 
         if (warnings.length > 0) result.warnings = warnings;
 
-    return result;
+        return result;
 
     } catch (err: any) {
         // Attempt cleanup of new chunks
@@ -544,7 +538,7 @@ const replaceFiles = async (FileModel: any, files: any, requestBody?: any, optio
                     }
 
                     // Build custom fields: prefer request-provided values, fall back to existingFile
-                    const coreFields = ['_id','filename','contentType','length','chunkSize','uploadDate','metadata'];
+                    const coreFields = ['_id', 'filename', 'contentType', 'length', 'chunkSize', 'uploadDate', 'metadata'];
                     const sourceForCustom = { ...(requestBody || {}), ...(fileObj.metadata || {}) };
                     const customFromSource = pickModelFields(FileModel, sourceForCustom, { exclude: coreFields });
 
@@ -637,7 +631,7 @@ const replaceFiles = async (FileModel: any, files: any, requestBody?: any, optio
                         }
                     }
 
-                    const coreFields2 = ['_id','filename','contentType','length','chunkSize','uploadDate','metadata'];
+                    const coreFields2 = ['_id', 'filename', 'contentType', 'length', 'chunkSize', 'uploadDate', 'metadata'];
                     const source = { ...(requestBody || {}), ...(fileObj.metadata || {}) };
                     const custom = pickModelFields(FileModel, source, { exclude: coreFields2 });
 
@@ -757,9 +751,9 @@ const replaceFilesWithTransaction = async (FileModel: any, files: any, requestBo
     }
 };
 
-export { 
-    updateFile,
-     deleteFiles,
+export {
+    uploadFile,
+    deleteFiles,
     deleteFile,
     getFileAndBuffer,
     replaceFiles,
