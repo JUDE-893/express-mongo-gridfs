@@ -1,17 +1,7 @@
 <div align="center">
 
-<div align="center">
-
 # 🚀 express-mongo-gridfs
 
-[![npm version](https://img.shields.io/npm/v/express-mongo-gridfs?style=for-the-badge&color=33cc33)](https://www.npmjs.com/package/express-mongo-gridfs)
-[![License](https://img.shields.io/github/license/JUDE-893/express-mongo-gridfs?style=for-the-badge&color=007bff)](./LICENSE)
-[![NPM Downloads](https://img.shields.io/npm/dm/express-mongo-gridfs?style=for-the-badge&color=00c2ff)](https://www.npmjs.com/package/express-mongo-gridfs)
-
-**A premium, enterprise-ready toolkit for professional file management in MongoDB using GridFS.**  
-Build robust, scalable, and fully-documented file APIs in minutes.
-
-</div>
 [![npm version](https://img.shields.io/npm/v/express-mongo-gridfs?style=for-the-badge&color=33cc33)](https://www.npmjs.com/package/express-mongo-gridfs)
 [![License](https://img.shields.io/github/license/JUDE-893/express-mongo-gridfs?style=for-the-badge&color=007bff)](./LICENSE)
 [![NPM Downloads](https://img.shields.io/npm/dm/express-mongo-gridfs?style=for-the-badge&color=00c2ff)](https://www.npmjs.com/package/express-mongo-gridfs)
@@ -28,14 +18,7 @@ Build robust, scalable, and fully-documented file APIs in minutes.
 - [📋 Prerequisites](#-prerequisites)
 - [💾 Installation](#-installation)
 - [🧩 Core Initialization](#-core-initialization)
-
-- [📋 Prerequisites](#-prerequisites)
-- [💾 Installation](#-installation)
-- [🧩 Core Initialization](#-core-initialization)
 - [🏗 Model Management](#-model-management)
-  - [⚙️ Configuration Deep Dive](#model-configuration-deep-dive)
-  - [🔍 Default Logic & Naming](#-default-logic--naming)
-  - [📝 Schema Extension Example](#schema-extension-example)
   - [⚙️ Configuration Deep Dive](#model-configuration-deep-dive)
   - [🔍 Default Logic & Naming](#-default-logic--naming)
   - [📝 Schema Extension Example](#schema-extension-example)
@@ -43,17 +26,10 @@ Build robust, scalable, and fully-documented file APIs in minutes.
   - [🛠 Router Configuration Options](#router-configuration-options)
   - [➕ Extending the Router](#extending-the-router)
   - [📄 Swagger Setup Guide](#swagger-setup-guide)
-  - [🛠 Router Configuration Options](#router-configuration-options)
-  - [➕ Extending the Router](#extending-the-router)
-  - [📄 Swagger Setup Guide](#swagger-setup-guide)
 - [🛠 Exhaustive Utilities API](#-exhaustive-utilities-api)
   - [📂 File Operations](#file-operations)
   - [🛡 Transaction Support](#transaction-support)
-  - [📂 File Operations](#file-operations)
-  - [🛡 Transaction Support](#transaction-support)
 - [⚠️ Error Handling & Storage Logic](#-error-handling--storage-logic)
-- [📄 License](#-license)
-- [🤝 Contributing](#-contributing)
 - [📄 License](#-license)
 - [🤝 Contributing](#-contributing)
 
@@ -63,12 +39,7 @@ Build robust, scalable, and fully-documented file APIs in minutes.
 
 - **Node.js**: `v18.0.0+`
 - **MongoDB**: `v5.0+` (GridFS support)
-- **Node.js**: `v18.0.0+`
-- **MongoDB**: `v5.0+` (GridFS support)
 - **Replica Set**: **Mandatory** for transactions (`replaceFilesWithTransaction`).
-
-> [!IMPORTANT]  
-> 🔗 Refer to the [Official Mongoose Guide to Replica Sets](https://mongoosejs.com/docs/transactions.html) for setup.
 
 > [!IMPORTANT]  
 > 🔗 Refer to the [Official Mongoose Guide to Replica Sets](https://mongoosejs.com/docs/transactions.html) for setup.
@@ -95,13 +66,10 @@ async function connectDatabase(connectionString) {
   try {
     await mongoose.connect(connectionString, { family: 4 });
     console.log("✅ Connected to DB successfully");
-    console.log("✅ Connected to DB successfully");
     
-    // 🛡️ CRITICAL: Initialize GridFS with the connection
     // 🛡️ CRITICAL: Initialize GridFS with the connection
     initGridFS(mongoose.connection);
   } catch (err) {
-    console.error("❌ Database connection error:", err);
     console.error("❌ Database connection error:", err);
     throw err;
   }
@@ -118,18 +86,14 @@ The `createFilesModel` function generates a Mongoose model specifically tuned fo
 
 | Option | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| :--- | :--- | :--- | :--- |
 | `collection` | `string` | `'upload'` | Base name for the collections. |
 | `modelSchema` | `object` | `{}` | Mongoose schema definition to merge into the base file schema. |
-| `indexes` | `array` | `[]` | Array of `{ field: string, order: 1 \| -1 }` to apply to the metadata. |
 | `indexes` | `array` | `[]` | Array of `{ field: string, order: 1 \| -1 }` to apply to the metadata. |
 
 ### 🔍 Default Logic & Naming
 
 
 - **Collection Name**: The underlying MongoDB collection will be `${collection}.files`.
-- **Model Name**: The Mongoose model is registered as `${CapitalizedCollection}File`.  
-  *Example: A collection named `media` becomes `MediaFile`.*
 - **Model Name**: The Mongoose model is registered as `${CapitalizedCollection}File`.  
   *Example: A collection named `media` becomes `MediaFile`.*
 - **Base Schema**: Every model includes `filename`, `contentType`, `length`, `chunkSize`, `uploadDate`, and `metadata` by default.
@@ -175,14 +139,11 @@ const userFilesRouter = createFileRouter({
             // Define allowed MIME types for all supported formats
             const allowedMimes = [
                 //images
-                //images
                 'image/jpeg',
                 'image/jpg',
                 'image/png',
                 //pdf
-                //pdf
                 'application/pdf',
-                //word
                 //word
                 'application/msword'
             ];
@@ -190,7 +151,6 @@ const userFilesRouter = createFileRouter({
             if (allowedMimes.includes(file.mimetype)) {
                 cb(null, true);
             } else {
-                cb(new Error('Invalid file type. Supported formats: images, PDF.'), false);
                 cb(new Error('Invalid file type. Supported formats: images, PDF.'), false);
             }
         }
@@ -205,26 +165,14 @@ const userFilesRouter = createFileRouter({
         bulkUpload: [your_auth_middleware],
         delete: [your_AuthMiddleware],
         deleteBulk: [your_AuthMiddleware],
-        // Auth middleware on ALL routes
-        upload: [your_auth_middleware, your_rate_limiter],
-        list: [your_auth_middleware],
-        get: [your_auth_middleware],
-        download: [your_auth_middleware],
-        update: [your_auth_middleware],
-        bulkUpload: [your_auth_middleware],
-        delete: [your_AuthMiddleware],
-        deleteBulk: [your_AuthMiddleware],
     },
     swaggerConfig: {
-        tags: ['User Files']
         tags: ['User Files']
     }
 });
 ```
 
 ### ➕ Extending the Router
-
-Since it returns a standard `express.Router`, you can mount additional logic easily:
 
 Since it returns a standard `express.Router`, you can mount additional logic easily:
 
@@ -241,7 +189,6 @@ app.use('/api/files', fileRouter);
 ```
 
 ### 📄 Swagger Setup Guide
-
 
 Add the library routes to your existing Swagger documentation:
 
@@ -271,7 +218,6 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
 
 ## 🛠 Exhaustive Utilities API
 
-### 📂 File Operations
 ### 📂 File Operations
 
 #### `uploadFile(model, file, body)`
@@ -313,9 +259,7 @@ Ensures atomicity for bulk operations. If one file fails, the entire operation i
 try {
   const report = await replaceFilesWithTransaction(UserDocs, req.files, req.body);
   console.log('✅ Processed:', report.summary);
-  console.log('✅ Processed:', report.summary);
 } catch (err) {
-  console.error('❌ Transaction rolled back:', err.message);
   console.error('❌ Transaction rolled back:', err.message);
 }
 ```
@@ -327,14 +271,10 @@ try {
 - **🛡️ Orphan Prevention**: If a metadata save fails after writing chunks, the library triggers a **best-effort cleanup** of the orphaned chunks.
 - **🛡️ Safety First**: During file updates, the new data is committed **before** the old data is deleted, ensuring no "missing file" window.
 - **🛡️ Granular Feedback**: Batch operations return a `207 Multi-Status` on partial failure, providing a detailed `summary` and `errors` array.
-- **🛡️ Orphan Prevention**: If a metadata save fails after writing chunks, the library triggers a **best-effort cleanup** of the orphaned chunks.
-- **🛡️ Safety First**: During file updates, the new data is committed **before** the old data is deleted, ensuring no "missing file" window.
-- **🛡️ Granular Feedback**: Batch operations return a `207 Multi-Status` on partial failure, providing a detailed `summary` and `errors` array.
 
 ---
 
 ## 📄 License
-
 
 ISC
 
@@ -346,6 +286,6 @@ Contributions are welcome! Please open an issue or submit a pull request.
 
 ---
 
-<p align="center" style="margin-top: 2rem;">
-  <i style="color: gray;">Maintained & Crafted with ❤️ by <a href="https://github.com/JUDE-893" style="color: grey; font-weight: bold;">JUDE-893</a></i>
+<p align="center" style="color: gray; margin-top: 2rem;">
+  <i>Maintained & Crafted with ❤️ by <a href="https://github.com/JUDE-893" style="color: gray; font-weight: bold;">JUDE-893</a></i>
 </p>
