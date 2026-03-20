@@ -6,9 +6,10 @@ import { toCapCase } from '../core/utils.js';
  * Create and return a Mongoose model for file documents (GridFS-style files collection).
  *
  * This function builds a Mongoose Schema by merging a base file schema with any user-supplied
- * schema additions, applies configured indexes, and registers a Mongoose model named
- * `${toCapCase(collection)}File`. The underlying MongoDB collection used for storing the files
- * is formed by appending `.files` to the provided `collection` name (e.g. `"upload.files"`).
+ * schema additions, applies configured schema options (including virtuals, transforms, etc.),
+ * and registers a Mongoose model named `${toCapCase(collection)}File`. The underlying MongoDB
+ * collection used for storing the files is formed by appending `.files` to the provided `collection`
+ * name (e.g. `"upload.files"`).
  *
  * The resulting model is intended to represent file metadata entries typically used with GridFS.
  *
@@ -16,9 +17,9 @@ import { toCapCase } from '../core/utils.js';
  * @param config.modelSchema - Additional schema properties to merge into the base file schema.
  *                              Defaults to an empty object.
  * @param config.collection - Base collection name (without the `.files` suffix). Defaults to `"upload"`.
- * @param config.indexes - Array of index descriptors to apply to the schema. Each descriptor should
- *                         include `field` (the field name to index) and `order` (1 for asc, -1 for desc).
- *                         Defaults to `[]`.
+ * @param config.schemaOptions - Standard Mongoose Schema options object. Can be used to configure
+ *                               `toJSON`, `toObject`, `timestamps`, `strict` and other
+ *                               schema-level behaviors. Defaults to `{}`.
  *
  * @returns A Mongoose Model for the files collection (type: import('mongoose').Model<any>).
  *
@@ -29,43 +30,43 @@ import { toCapCase } from '../core/utils.js';
  * const Files = createFilesModel();
  *
  * @example
- * // Add custom schema fields and indexes:
+ * // Add custom schema fields and schema options (including virtuals):
  * const Files = createFilesModel({
  *   modelSchema: { ownerId: { type: String, required: true } },
  *   collection: 'userUploads',
- *   indexes: [{ field: 'ownerId', order: 1 }, { field: 'uploadDate', order: -1 }]
+ *   schemaOptions: {
+ *     toJSON: { virtuals: true, transformer: transformerFn },
+ *     toObject: { virtuals: true, transformer: transformerFn }
+ *   }
  * });
  *
  * @public
-*/
-interface IndexDescriptor {
-    field: string;
-    order: mongoose.IndexDirection;
-}
-
+ */
 interface CreateFilesModelConfig {
     modelSchema?: mongoose.SchemaDefinition;
     collection?: string;
-    indexes?: IndexDescriptor[];
+    schemaOptions?: mongoose.SchemaOptions;
 }
 
-const createFilesModel = function(config: CreateFilesModelConfig = {modelSchema: {}, collection: 'upload', indexes: []}) {
+const createFilesModel = function ({
+    modelSchema = {},
+    collection = 'upload',
+    schemaOptions = {}
+}: CreateFilesModelConfig = {}) {
 
     const FilesSchema = new mongoose.Schema({
-        ...baseFileSchema, ...config.modelSchema
+        ...baseFileSchema, ...modelSchema
     }, {
-        collection: (config.collection + '.files'), // Custom collection name for GridFS
+        collection: (collection + '.files'), // Custom collection name for GridFS
         strict: true,
-        strictQuery: true
+        strictQuery: true,
+        ...schemaOptions
     });
 
 
-    const indexes = config.indexes ?? [];
-    indexes.forEach((index) => {
-        FilesSchema.index({ [index.field]: index.order });
-    })
 
-    const FileModel = mongoose.model((toCapCase(config?.collection ?? 'upload')+'File'), FilesSchema);
+
+    const FileModel = mongoose.model((toCapCase(collection) + 'File'), FilesSchema);
 
     return FileModel
 
