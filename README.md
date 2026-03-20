@@ -80,7 +80,7 @@ async function connectDatabase(connectionString) {
 
 ## 🏗 Model Management
 
-The `createFilesModel` function generates a Mongoose model specifically tuned for GridFS metadata. It handles collection naming, schema merging, and indexing.
+The `createFilesModel` function generates a Mongoose model specifically tuned for GridFS metadata. It handles collection naming, schema merging, and schema options (including indexing, transforms, and virtuals).
 
 ### ⚙️ Model Configuration Deep Dive
 
@@ -88,10 +88,9 @@ The `createFilesModel` function generates a Mongoose model specifically tuned fo
 | :--- | :--- | :--- | :--- |
 | `collection` | `string` | `'upload'` | Base name for the collections. |
 | `modelSchema` | `object` | `{}` | Mongoose schema definition to merge into the base file schema. |
-| `indexes` | `array` | `[]` | Array of `{ field: string, order: 1 \| -1 }` to apply to the metadata. |
+| `schemaOptions` | `object` | `{}` | Standard Mongoose Schema options object. Can configure `toJSON`, `toObject`, `timestamps`, `strict`, and other schema-level behaviors. |
 
 ### 🔍 Default Logic & Naming
-
 
 - **Collection Name**: The underlying MongoDB collection will be `${collection}.files`.
 - **Model Name**: The Mongoose model is registered as `${CapitalizedCollection}File`.  
@@ -110,11 +109,15 @@ const UserDocs = createFilesModel({
     category: { type: String, enum: ['invoice', 'id_card', 'other'] },
     isVerified: { type: Boolean, default: false }
   },
-  indexes: [
-    { field: 'owner', order: 1 },
-    { field: 'category', order: 1 }
-  ]
+  schemaOptions: {
+    toJSON: { virtuals: true, transformer: yourTransFormerFn },
+    toObject: { virtuals: true, transformer: yourTransFormerFn }
+  }
 });
+
+// additional settings
+UserDocs.schema.index({ category: 1 }); 
+UserDocs.syncIndexes();
 ```
 
 ---
