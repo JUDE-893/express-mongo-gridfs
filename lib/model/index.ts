@@ -48,7 +48,7 @@ interface CreateFilesModelConfig {
     schemaOptions?: mongoose.SchemaOptions;
 }
 
-const createFilesModel = function ({
+export const createFilesModel = function ({
     modelSchema = {},
     collection = 'upload',
     schemaOptions = {}
@@ -72,4 +72,3 @@ const createFilesModel = function ({
 
 }
 
-export default createFilesModel;

@@ -28,11 +28,11 @@ interface RouterOptions {
   multerConfig?: multer.Options;
   routeMiddlewares?: Record<string, express.RequestHandler[]>;
   swaggerConfig?: {
-    tags?: string;
+    tags?: string | string[];
   };
 }
 
-const createFileRouter = (options: RouterOptions) => {
+export const createFileRouter = (options: RouterOptions) => {
   const router = express.Router();
 
   // Destructure options
@@ -362,4 +362,3 @@ const createFileRouter = (options: RouterOptions) => {
   return router;
 };
 
-export default createFileRouter;
