@@ -24,7 +24,7 @@ async function testInvalidId() {
     const { req, res, getResult } = makeReqRes({ fileId: 'not-a-valid-id' });
     const handler = createFileDeleteHandler({} as any);
 
-    await handler(req, res, () => {});
+    await handler(req, res, () => { });
 
     const result = getResult();
     assert.strictEqual(result.statusCode, 400, 'Expected 400 for invalid id');
@@ -35,7 +35,7 @@ async function testMissingId() {
     const { req, res, getResult } = makeReqRes({});
     const handler = createFileDeleteHandler({} as any);
 
-    await handler(req, res, () => {});
+    await handler(req, res, () => { });
 
     const result = getResult();
     assert.strictEqual(result.statusCode, 400, 'Expected 400 for missing id');
