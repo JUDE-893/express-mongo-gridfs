@@ -9,11 +9,14 @@ let gridfsBucket: GridFSBucket | null = null;
  * Short: call once after opening a mongoose connection.
  *
  * @param connection - Mongoose Connection (or any object with a `db: Db`) used to create the GridFSBucket
+ * @param options - Optional settings for GridFSBucket initialization
+ * @param options.bucketName - Optional custom bucket name (default: "uploads")
  * @throws Error when connection or connection.db is missing
  */
-function initGridFS(connection: MongooseConnection | { db: Db }): void {
+function initGridFS(connection: MongooseConnection | { db: Db }, options: { bucketName?: string } = {bucketName: "uploads"}): void {
   if (!connection || !connection.db) throw new Error('Mongoose connection required');
-  gridfsBucket = new GridFSBucket(connection.db, { bucketName: 'uploads' });
+  const bucketOptions = options && options.bucketName ? { bucketName: options.bucketName } : {};
+  gridfsBucket = new GridFSBucket(connection.db, bucketOptions);
 }
 
 /**
