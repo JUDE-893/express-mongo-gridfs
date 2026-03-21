@@ -1,6 +1,6 @@
 {
   "name": "express-mongo-gridfs",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -23,7 +23,19 @@
   },
   "author": "JUDE-893",
   "license": "ISC",
-  "description": "",
+  "description": "A premium, enterprise-ready toolkit for seamless integration of Express.js and MongoDB GridFS, designed to simplify file storage and retrieval with robust features and exceptional performance.",
+  "keywords": [
+    "express",
+    "mongodb",
+    "gridfs",
+    "mongoose",
+    "fs",
+    "file storage",
+    "file retrieval",
+    "node.js",
+    "javascript",
+    "typescript"
+  ],
   "dependencies": {
     "express": "^5.2.1",
     "mongodb": "^7.1.0",

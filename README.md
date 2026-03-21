@@ -191,7 +191,19 @@ fileRouter.get('/stats/summary', async (req, res) => {
 app.use('/api/files', fileRouter);
 ```
 
-### 📄 Swagger Setup Guide
+---
+
+### 🔐 Automatic User Attribution
+
+If your middleware (e.g., Passport, JWT) attaches a `user` object to the `req` with an `id` or `_id`, the library will automatically attribute `uploadedBy` to that ID if it isn't explicitly provided in the request body.
+
+This is supported in:
+- `POST /upload`
+- `POST /upload-files` (Bulk)
+
+---
+
+## 📄 Swagger Setup Guide
 
 Add the library routes to your existing Swagger documentation:
 
@@ -273,7 +285,8 @@ try {
 
 - **🛡️ Orphan Prevention**: If a metadata save fails after writing chunks, the library triggers a **best-effort cleanup** of the orphaned chunks.
 - **🛡️ Safety First**: During file updates, the new data is committed **before** the old data is deleted, ensuring no "missing file" window.
-- **🛡️ Granular Feedback**: Batch operations return a `207 Multi-Status` on partial failure, providing a detailed `summary` and `errors` array.
+- **🛡️ Granular Feedback**: Batch operations return a `207 Multi-Status` on partial failure, providing a detailed `summary` (including `successful` count) and `errors` array.
+- **🛡️ Smart Response**: Single upload responses merge any custom schema-defined root fields into the `metadata` object for easier client-side consumption.
 
 ---
 

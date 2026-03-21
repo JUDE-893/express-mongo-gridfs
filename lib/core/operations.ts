@@ -10,7 +10,8 @@ import mongoose from "mongoose";
  * 
  * @param {mongoose.Model<any>} FileModel - The Mongoose model instance associated with the file metadata.
  * @param {Array<string|ObjectId>|string|ObjectId} filesIds - The array of file IDs, a comma-separated string, or a single ObjectId to delete.
- * @returns {Promise<any>} A promise that resolves strictly to an object with the summary and breakdown details of the deletion.
+ * @returns {Promise<any>} A promise that resolves strictly to an object with the summary and breakdown details.
+ *                        Summary includes: totalRequested, validIds, invalidIds, found, notFound, deleted, failed.
  */
 const deleteFiles = async (FileModel: any, filesIds: any): Promise<any> => {
     // Fix runtime error: correctly handle single object IDs or empty arrays
@@ -458,6 +459,9 @@ const replaceOneImpl = async (FileModel: any, oldFileIdStr: any, file: any, requ
  * - Otherwise the helper will try to find an existing file by `filename`
  *   (originalname) and update it. If none exists it will create a new file.
  * - This helper is auth-agnostic and does not read `req.user`.
+ * 
+ * @returns {Promise<Object>} Response with `success`, `message`, `results` and `summary`.
+ *                           Summary includes: total, created, updated, failed, and successful (created + updated).
  */
 const replaceFiles = async (FileModel: any, files: any, requestBody?: any, options?: any): Promise<any> => {
     const session = options?.session;
@@ -678,6 +682,7 @@ const replaceFiles = async (FileModel: any, files: any, requestBody?: any, optio
         updated: results.filter(r => r.action === 'updated').length,
         failed: errors.length
     };
+    (summary as any).successful = summary.created + summary.updated;
 
     const response: any = {
         success: errors.length === 0,
