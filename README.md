@@ -170,7 +170,8 @@ const userFilesRouter = createFileRouter({
         deleteBulk: [your_AuthMiddleware],
     },
     swaggerConfig: {
-        tags: ['User Files']
+        tags: ['User Files'],
+        basePath: '/api/user-files'
     }
 });
 ```
