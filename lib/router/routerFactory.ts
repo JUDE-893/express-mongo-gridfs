@@ -23,6 +23,17 @@ interface RouterOptions {
   };
 }
 
+/**
+ * Creates an Express router for file operations.
+ *
+ * @param options - Configuration options for the router.
+ * @param options.model - The Mongoose model used to interact with the files collection.
+ * @param options.multerConfig - Multer configuration options for handling file uploads.
+ * @param options.routeMiddlewares - Custom middleware functions for specific routes.
+ * @param options.swaggerConfig - Swagger documentation configuration options.
+ *
+ * @returns An Express router instance configured for file operations.
+ */
 export const createFileRouter = (options: RouterOptions) => {
   const router = express.Router();
 
