@@ -31,7 +31,7 @@ const createFileUploadHandler = (FileModel: mongoose.Model<any>): RequestHandler
 
             // Check if GridFS is ready
             if (!isGridFSReady()) {
-                return res.status(503).json({
+                return res.status(500).json({
                     error: "Storage service is initializing",
                     code: "STORAGE_INITIALIZING"
                 });
@@ -70,7 +70,7 @@ const createFileUploadHandler = (FileModel: mongoose.Model<any>): RequestHandler
                 }
 
                 if (uploadError && uploadError.code === 'STORAGE_INITIALIZING') {
-                    return res.status(503).json({ error: "Storage service is initializing", code: "STORAGE_INITIALIZING" });
+                    return res.status(500).json({ error: "Storage service is initializing", code: "STORAGE_INITIALIZING" });
                 }
 
                 if (uploadError && uploadError.code === 'UPLOAD_ERROR') {
@@ -166,6 +166,14 @@ const createFileInfoHandler = (FileModel: mongoose.Model<any>): RequestHandler =
         try {
             const { fileId } = req.params;
 
+            // Additional validation for file ID to prevent injection attacks
+            if (!fileId || typeof fileId !== 'string' || !mongoose.Types.ObjectId.isValid(fileId)) {
+                return res.status(400).json({
+                    error: "Invalid file ID format",
+                    code: "INVALID_FILE_ID"
+                });
+            }
+
             const fileMetadata = await FileModel.findById(fileId);
 
             if (!fileMetadata) {
@@ -200,8 +208,11 @@ const createListFilesHandler = (FileModel: mongoose.Model<any>): RequestHandler 
     return async (req: CustomRequest, res: Response | any) => {
         try {
             const { page = 1, limit = 20, sort = '-uploadDate', ...filters } = req.query;
+            
+            // Parse pagination parameters with basic min validation only
             const pageNum = Math.max(1, Number(page) || 1);
             const limitNum = Math.max(1, Number(limit) || 20);
+            
             const skip = (pageNum - 1) * limitNum;
             let decoded = '';
             try {
@@ -210,32 +221,48 @@ const createListFilesHandler = (FileModel: mongoose.Model<any>): RequestHandler 
                 decoded = filters.filename as string;
             }
 
-            // Build query
+            // Build query with prototype pollution protection
             const query: any = {};
-
-            // Add filters
-            if (filters.contentType) {
-                query.contentType = { $regex: filters.contentType, $options: 'i' };
-            }
-            if (filters.filename) {
-                const escapedFilename = decoded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                query.filename = { $regex: new RegExp(escapedFilename, 'i') };
-            }
-            if (filters.uploadedBy) {
-                query.uploadedBy = filters.uploadedBy;
-            }
-            if (filters.category) {
-                query.category = filters.category;
-            }
-            if (filters.tags) {
-                if (typeof filters.tags === 'string') {
-                    query.tags = { $in: filters.tags.split(',') };
-                } else if (Array.isArray(filters.tags)) {
-                    query.tags = { $in: filters.tags };
+            
+            // Iterate through all provided filters, applying prototype pollution protection
+            for (const filterName in filters) {
+                if (filters.hasOwnProperty(filterName)) {
+                    // Prevent prototype pollution
+                    if (filterName === '__proto__' || filterName === 'constructor') {
+                        return res.status(400).json({
+                            error: "Invalid filter parameter",
+                            code: "INVALID_FILTER"
+                        });
+                    }
+                    
+                    // Apply filter based on field name
+                    switch(filterName) {
+                        case 'filename':
+                            // Validate and limit filename length to prevent ReDoS
+                            if (typeof filters.filename === 'string' && filters.filename.length > 256) {
+                                return res.status(400).json({
+                                    error: "Filename pattern too long",
+                                    code: "INVALID_FILENAME"
+                                });
+                            }
+                            
+                            const escapedFilename = decoded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                            query.filename = { $regex: new RegExp(escapedFilename, 'i') };
+                            break;
+                        case 'contentType':
+                            // Ensure contentType is a string to prevent injection
+                            query.contentType = { $regex: String(filters.contentType), $options: 'i' };
+                            break;
+                        case 'uploadedBy':
+                            query.uploadedBy = String(filters.uploadedBy);
+                            break;
+                        default:
+                            // For any other field, treat as a custom field and apply to query
+                            // Let Mongoose/schema validation handle the field validation
+                            query[filterName] = filters[filterName];
+                            break;
+                    }
                 }
-            }
-            if (filters.isPublic !== undefined) {
-                query.isPublic = filters.isPublic === 'true';
             }
 
             // Execute query
@@ -287,7 +314,8 @@ const createFileUpdateHandler = (FileModel: mongoose.Model<any>): RequestHandler
                 return res.status(400).json({ error: "File ID is required", code: "MISSING_ID" });
             }
 
-            if (!mongoose.Types.ObjectId.isValid(req.body.id)) {
+            // Validate file ID format
+            if (typeof req.body.id !== 'string' || !mongoose.Types.ObjectId.isValid(req.body.id)) {
                 return res.status(400).json({ error: "Invalid file ID format", code: "INVALID_ID_FORMAT" });
             }
 
@@ -429,8 +457,8 @@ const createFileDeleteHandler = (FileModel: mongoose.Model<any>): RequestHandler
         try {
             const { fileId } = req.params;
 
-            // Basic validation: ensure fileId is present and looks like an ObjectId
-            if (!fileId || !mongoose.Types.ObjectId.isValid(fileId)) {
+            // Additional validation for file ID to prevent injection attacks
+            if (!fileId || typeof fileId !== 'string' || !mongoose.Types.ObjectId.isValid(fileId)) {
                 return res.status(400).json({
                     error: "Invalid file ID format",
                     code: "INVALID_FILE_ID"
@@ -512,10 +540,13 @@ const createBatchDeleteHandler = (FileModel: mongoose.Model<any>): RequestHandle
             const invalidFileIds: string[] = [];
 
             for (const id of fileIds) {
-                if (mongoose.Types.ObjectId.isValid(id)) {
-                    validFileIds.push(new mongoose.Types.ObjectId(id));
+                // Ensure id is a string before validation
+                const idStr = String(id);
+                
+                if (mongoose.Types.ObjectId.isValid(idStr)) {
+                    validFileIds.push(new mongoose.Types.ObjectId(idStr));
                 } else {
-                    invalidFileIds.push(id);
+                    invalidFileIds.push(idStr);
                 }
             }
 
@@ -526,7 +557,6 @@ const createBatchDeleteHandler = (FileModel: mongoose.Model<any>): RequestHandle
                     invalidFileIds
                 });
             }
-
 
 
             // Utilize the core deleteFiles operation which seamlessly handles the deletion of metadata and chunks
@@ -559,4 +589,3 @@ export {
     createFileDeleteHandler,
     createBatchDeleteHandler
 };
-
