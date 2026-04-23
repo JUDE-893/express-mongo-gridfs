@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 # Security and Advanced Configuration
+=======
+# Documentation Improvement Plan
+>>>>>>> 7533ac894f3c7f1911191815d530052d70eab8fb
 
 This document outlines areas where documentation should be enhanced to help developers use express-mongo-gridfs securely and effectively.
 
