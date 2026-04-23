@@ -25,13 +25,16 @@ Build robust, scalable, and fully-documented file APIs in minutes.
 - [🌐 Express Router Factory](#-express-router-factory)
   - [🛠 Router Configuration Options](#router-configuration-options)
   - [➕ Extending the Router](#extending-the-router)
-  - [📄 Swagger Setup Guide](#swagger-setup-guide)
 - [🛠 Exhaustive Utilities API](#-exhaustive-utilities-api)
   - [📂 File Operations](#file-operations)
   - [🛡 Transaction Support](#transaction-support)
-- [⚠️ Error Handling & Storage Logic](#-error-handling--storage-logic)
+- [💡 Advanced Features and Integration](#advanced-features-and-integration)
+  - [📄 Swagger Setup Guide](#swagger-setup-guide)
+  - [🔐 Automatic User Attribution](#automatic-user-attribution)
+  - [⚠️ Error Handling & Storage Logic](#error-handling--storage-logic)
+- [📚 Security and Advanced Configuration](#security-and-advanced-configuration)
 - [📄 License](#-license)
-- [🤝 Contributing](#-contributing)
+
 
 ---
 
@@ -76,7 +79,10 @@ async function connectDatabase(connectionString) {
 }
 ```
 
----
+<br/>
+
+--- 
+<br />
 
 ## 🏗 Model Management
 
@@ -126,7 +132,10 @@ UserDocs.syncIndexes();
 
 </details>
 
----
+<br/>
+
+--- 
+<br />
 
 ## 🌐 Express Router Factory
 
@@ -182,7 +191,8 @@ const userFilesRouter = createFileRouter({
 });
 ```
 
-### ➕ Extending the Router
+<details>
+<summary><strong>➕ Extending the Router </strong></summary>
 
 Since it returns a standard `express.Router`, you can mount additional logic easily:
 
@@ -197,56 +207,12 @@ fileRouter.get('/stats/summary', async (req, res) => {
 
 app.use('/api/files', fileRouter);
 ```
-
----
-
-### 🔐 Automatic User Attribution
-
-<details>
-<summary><strong>Click to expand</strong></summary>
-
-If your middleware (e.g., Passport, JWT) attaches a `user` object to the `req` with an `id` or `_id`, the library will automatically attribute `uploadedBy` to that ID if it isn't explicitly provided in the request body.
-
-This is supported in:
-- `POST /upload`
-- `POST /upload-files` (Bulk)
-
 </details>
 
----
+<br/>
 
-## 📄 Swagger Setup Guide
-
-<details>
-<summary><strong>Click to expand</strong></summary>
-
-Add the library routes to your existing Swagger documentation:
-
-```javascript
-import swaggerJSDoc from "swagger-jsdoc";
-
-const swaggerOptions = {
-  definition: {
-    openapi: "3.0.0",
-    info: {
-      title: "My System API",
-      version: "1.0.0",
-      description: "API for managing files and users"
-    },
-  },
-  apis: [
-    "./src/routes/*.js",              // Your existing routes
-    "./src/modules/files/*.js",       // Where Your created Routers are
-  ],
-};
-
-const swaggerSpecs = swaggerJSDoc(swaggerOptions);
-app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
-```
-
-</details>
-
----
+--- 
+<br />
 
 ## 🛠 Exhaustive Utilities API
 
@@ -324,9 +290,64 @@ try {
 
 </details>
 
+<br/>
+
+--- 
+<br />
+
+
+### 💡 Advanced Features and Integration
 ---
 
-## ⚠️ Error Handling & Storage Logic
+### 📄 Swagger Setup Guide
+
+<details>
+<summary><strong>Click to expand</strong></summary>
+
+Add the library routes to your existing Swagger documentation:
+
+```javascript
+import swaggerJSDoc from "swagger-jsdoc";
+
+const swaggerOptions = {
+  definition: {
+    openapi: "3.0.0",
+    info: {
+      title: "My System API",
+      version: "1.0.0",
+      description: "API for managing files and users"
+    },
+  },
+  apis: [
+    "./src/routes/*.js",              // Your existing routes
+    "./src/modules/files/*.js",       // Where Your created Routers are
+  ],
+};
+
+const swaggerSpecs = swaggerJSDoc(swaggerOptions);
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
+```
+
+</details>
+
+---
+
+### 🔐 Automatic User Attribution
+
+<details>
+<summary><strong>Click to expand</strong></summary>
+
+If your middleware (e.g., Passport, JWT) attaches a `user` object to the `req` with an `id` or `_id`, the library will automatically attribute `uploadedBy` to that ID if it isn't explicitly provided in the request body.
+
+This is supported in:
+- `POST /upload`
+- `POST /upload-files` (Bulk)
+
+</details>
+
+---
+
+### ⚠️ Error Handling & Storage Logic
 
 <details>
 <summary><strong>Click to expand</strong></summary>
@@ -338,20 +359,35 @@ try {
 
 </details>
 
----
+<br/>
+
+--- 
+<br />
+
+## 📚 Security and Advanced Configuration
+
+> For detailed guidance on securing your application and advanced configuration options, please refer to our [Security and Advanced Configuration](DOCS/Security_and_Advanced_Configuration.md).
+
+
+<br/>
+
+--- 
+<br />
 
 ## 📄 License
 
-ISC
+⚖️ ISC
 
 ---
 
-## 🤝 Contributing
 
-Contributions are welcome! Please open an issue or submit a pull request.
 
----
 
 <p align="center" style="color: gray; margin-top: 2rem;">
   <i>Maintained & Crafted with ❤️ by <a href="https://github.com/JUDE-893" style="color: gray; font-weight: bold;">JUDE-893</a></i>
 </p>
+
+
+<br/>
+
+<br />
