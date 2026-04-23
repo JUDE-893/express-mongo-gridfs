@@ -90,14 +90,18 @@ The `createFilesModel` function generates a Mongoose model specifically tuned fo
 | `modelSchema` | `object` | `{}` | Mongoose schema definition to merge into the base file schema. |
 | `schemaOptions` | `object` | `{}` | Standard Mongoose Schema options object. Can configure `toJSON`, `toObject`, `timestamps`, `strict`, and other schema-level behaviors. |
 
-### 🔍 Default Logic & Naming
+<details>
+<summary><strong>🔍 Default Logic & Naming (Click to expand)</strong></summary>
 
 - **Collection Name**: The underlying MongoDB collection will be `${collection}.files`.
 - **Model Name**: The Mongoose model is registered as `${CapitalizedCollection}File`.  
   *Example: A collection named `media` becomes `MediaFile`.*
 - **Base Schema**: Every model includes `filename`, `contentType`, `length`, `chunkSize`, `uploadDate`, and `metadata` by default.
 
-### 📝 Schema Extension Example
+</details>
+
+<details>
+<summary><strong>📝 Schema Extension Example (Click to expand)</strong></summary>
 
 ```javascript
 import { createFilesModel } from 'express-mongo-gridfs';
@@ -119,6 +123,8 @@ const UserDocs = createFilesModel({
 UserDocs.schema.index({ category: 1 }); 
 UserDocs.syncIndexes();
 ```
+
+</details>
 
 ---
 
@@ -196,15 +202,23 @@ app.use('/api/files', fileRouter);
 
 ### 🔐 Automatic User Attribution
 
+<details>
+<summary><strong>Click to expand</strong></summary>
+
 If your middleware (e.g., Passport, JWT) attaches a `user` object to the `req` with an `id` or `_id`, the library will automatically attribute `uploadedBy` to that ID if it isn't explicitly provided in the request body.
 
 This is supported in:
 - `POST /upload`
 - `POST /upload-files` (Bulk)
 
+</details>
+
 ---
 
 ## 📄 Swagger Setup Guide
+
+<details>
+<summary><strong>Click to expand</strong></summary>
 
 Add the library routes to your existing Swagger documentation:
 
@@ -230,13 +244,17 @@ const swaggerSpecs = swaggerJSDoc(swaggerOptions);
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
 ```
 
+</details>
+
 ---
 
 ## 🛠 Exhaustive Utilities API
 
 ### 📂 File Operations
 
-#### `uploadFile(model, file, body)`
+<details>
+<summary><strong>uploadFile(model, file, body) (Click to expand)</strong></summary>
+
 Uploads a file and persists metadata.
 ```javascript
 const result = await uploadFile(UserDocs, req.file, { 
@@ -245,30 +263,54 @@ const result = await uploadFile(UserDocs, req.file, {
 });
 ```
 
-#### `replaceFile(model, id, file, body)`
+</details>
+
+<details>
+<summary><strong>replaceFile(model, id, file, body) (Click to expand)</strong></summary>
+
 Updates an existing file by creating new chunks and cleaning up the old ones.
 ```javascript
 const result = await replaceFile(UserDocs, '64af...', req.file, { category: 'updated' });
 ```
 
-#### `replaceFiles(model, files, body)`
+</details>
+
+<details>
+<summary><strong>replaceFiles(model, files, body) (Click to expand)</strong></summary>
+
 Bulk operation. Updates if file ID/name is provided; otherwise, creates new entries.
 ```javascript
 const response = await replaceFiles(UserDocs, req.files, req.body);
 ```
 
-#### `deleteFiles(model, ids)`
+</details>
+
+<details>
+<summary><strong>deleteFiles(model, ids) (Click to expand)</strong></summary>
+
 Safely removes metadata and GridFS chunks for one or more IDs. Supports arrays or comma-separated strings.
 
-#### `deleteFile(model, id)`
+</details>
+
+<details>
+<summary><strong>deleteFile(model, id) (Click to expand)</strong></summary>
+
 Shorthand for `deleteFiles(model, id)`.
 
-#### `getFileAndBuffer(model, id)`
+</details>
+
+<details>
+<summary><strong>getFileAndBuffer(model, id) (Click to expand)</strong></summary>
+
 Retrieves metadata and full binary content as a `Buffer`. Perfect for custom processing.
+
+</details>
 
 ### 🛡 Transaction Support
 
-#### `replaceFilesWithTransaction(model, files, body)`
+<details>
+<summary><strong>replaceFilesWithTransaction(model, files, body) (Click to expand)</strong></summary>
+
 Ensures atomicity for bulk operations. If one file fails, the entire operation is rolled back.
 
 ```javascript
@@ -280,14 +322,21 @@ try {
 }
 ```
 
+</details>
+
 ---
 
 ## ⚠️ Error Handling & Storage Logic
+
+<details>
+<summary><strong>Click to expand</strong></summary>
 
 - **🛡️ Orphan Prevention**: If a metadata save fails after writing chunks, the library triggers a **best-effort cleanup** of the orphaned chunks.
 - **🛡️ Safety First**: During file updates, the new data is committed **before** the old data is deleted, ensuring no "missing file" window.
 - **🛡️ Granular Feedback**: Batch operations return a `207 Multi-Status` on partial failure, providing a detailed `summary` (including `successful` count) and `errors` array.
 - **🛡️ Smart Response**: Single upload responses merge any custom schema-defined root fields into the `metadata` object for easier client-side consumption.
+
+</details>
 
 ---
 
