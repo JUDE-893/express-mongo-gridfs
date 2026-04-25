@@ -227,8 +227,13 @@ const createListFilesHandler = (FileModel: mongoose.Model<any>): RequestHandler 
             // Iterate through all provided filters, applying prototype pollution protection
             for (const filterName in filters) {
                 if (filters.hasOwnProperty(filterName)) {
-                    // Prevent prototype pollution
-                    if (filterName === '__proto__' || filterName === 'constructor') {
+                    // Prevent prototype pollution by checking for dangerous properties
+                    if (filterName === '__proto__' || 
+                        filterName === 'constructor' || 
+                        filterName === 'prototype' ||
+                        filterName === 'hasOwnProperty' ||
+                        filterName === 'toString' ||
+                        filterName === 'valueOf') {
                         return res.status(400).json({
                             error: "Invalid filter parameter",
                             code: "INVALID_FILTER"
