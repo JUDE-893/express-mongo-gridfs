@@ -1,29 +1,31 @@
 {
   "compilerOptions": {
-    "target": "ES2022", // modern JS output
-    "module": "NodeNext", // emit ESM (NodeNext required with moduleResolution: NodeNext)
-    "moduleResolution": "NodeNext", // resolves Node-style imports
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
-    "rootDir": ".", // project root (since index.ts + lib are here)
-    "outDir": "./dist", // compiled output
-    "declaration": true, // emit .d.ts files
-    "declarationMap": true, // source maps for types
-    "sourceMap": true, // JS source maps
-    "strict": true, // all strict checks
+    "rootDir": ".",
+    "outDir": "./dist",
+    "declaration": true,
+    "sourceMap": true,
+    "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": false,
     "moduleDetection": "force",
+    "removeComments": true,
+    "importHelpers": true,
+    "importsNotUsedAsValues": "remove",
     "types": [
       "node"
-    ], // include Node types if needed
-    "baseUrl": ".", // project root
+    ],
+    "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"] // alias @/lib/core/gridfs → ./lib/core/gridfs.ts
+      "@/*": ["./*"]
     }
   },
   "include": [
@@ -36,5 +38,3 @@
     "tests"
   ]
 }
-
-

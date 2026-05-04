@@ -15,7 +15,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "rollup -c && tsc --emitDeclarationOnly",
+    "build:dev": "rollup -c --watch",
     "prepack": "npm run build",
     "start": "node ./dist/index.js",
     "test": "tsx tests/router/service/unittest.test.ts",
@@ -36,10 +37,12 @@
     "javascript",
     "typescript"
   ],
-  "dependencies": {
+  "peerDependencies": {
     "express": "^5.2.1",
     "mongodb": "^7.1.0",
-    "mongoose": "^9.3.0",
+    "mongoose": "^9.3.0"
+  },
+  "dependencies": {
     "multer": "^2.1.1"
   },
   "devDependencies": {
