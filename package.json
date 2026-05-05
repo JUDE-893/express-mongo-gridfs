@@ -12,6 +12,7 @@
       "require": "./dist/index.cjs"
     }
   },
+  "sideEffects": false,
   "files": [
     "dist"
   ],
@@ -23,7 +24,9 @@
     "prepack": "npm run build",
     "start": "node ./dist/index.js",
     "test": "tsx tests/router/service/unittest.test.ts",
-    "test-integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/router/routes-integration.test.ts"
+    "test-integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/router/routes-integration.test.ts",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint . --ext .ts,.js --fix"
   },
   "author": "JUDE-893",
   "license": "ISC",
@@ -65,6 +68,11 @@
     "ts-jest": "^29.4.6",
     "tslib": "^2.8.1",
     "tsx": "^4.20.5",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@eslint/js": "^9.10.0",
+    "eslint": "^9.10.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.30.0",
+    "@stylistic/eslint-plugin-js": "^2.8.0"
   }
 }

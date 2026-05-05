@@ -14,15 +14,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'npm'
 
       - run: npm ci
-      #- run: npm test
+
+      - run: npm run lint || true    # Optional: run if you have lint
+
+      - run: npm test                # Enable unit tests
+      
+      - run: npm run test-integration # Enable integration tests
+
       - run: npm run build
+
+      - run: npm run check-types     # Add: tsc --noEmit
 
   publish:
     needs: ci
     runs-on: ubuntu-latest
-
+    if: startsWith(github.event.head_commit.message, 'release:')  # Only on version bumps
+    
     steps:
       - uses: actions/checkout@v4
 
@@ -30,8 +40,10 @@ jobs:
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org/
+          cache: 'npm'
 
       - run: npm ci
+      - run: npm run build          # Ensure fresh build
       - run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
