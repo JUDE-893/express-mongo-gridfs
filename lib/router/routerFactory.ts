@@ -80,6 +80,8 @@ export const createFileRouter = (options: RouterOptions) => {
 
   router.get("/", ...applyMiddlewares("list"), listFilesHandler);
 
+  router.get("/:fileId", ...applyMiddlewares("get"), fileInfoHandler);
+
   router.get("/download/:fileId", ...applyMiddlewares("download"), downloadHandler);
 
   router.post(
