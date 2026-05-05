@@ -55,6 +55,10 @@ Build robust, scalable, and fully-documented file APIs in minutes.
 npm install express-mongo-gridfs
 ```
 
+### Module Formats
+
+> _This library supports both: **ES Modules (ESM)**: Use with `import` statements & **CommonJS (CJS)**: Use with `require()`_
+
 ---
 
 ## 🧩 Core Initialization
